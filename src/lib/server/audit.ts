@@ -1,31 +1,7 @@
 import { createServerFn } from '@tanstack/react-start';
-import { getSupabaseAdmin, type Env } from '../db/supabase';
+import { getSupabaseAdmin } from '../db/supabase';
 import { runAudit } from '../audit/orchestrator';
-
-/**
- * Reads Cloudflare Workers env bindings.
- * In Cloudflare Workers runtime, env is available via globalThis or
- * process.env (with nodejs_compat). TanStack Start may expose it via
- * a different mechanism — adjust if needed.
- */
-function getEnv(): Env {
-  const env =
-    (globalThis as any).env ||
-    (typeof process !== 'undefined' ? (process as any).env : {}) ||
-    {};
-  return env as Env;
-}
-
-/**
- * Gets executionCtx for ctx.waitUntil() — keeps async work alive
- * after response returns. Critical for audits that take 1-3 min.
- */
-function getExecutionCtx(): {
-  waitUntil?: (promise: Promise<unknown>) => void;
-} | null {
-  const ctx = (globalThis as any).executionCtx;
-  return ctx || null;
-}
+import { getEnv, getExecutionCtx } from './runtime';
 
 /**
  * POST /api/audit/start
