@@ -4,5 +4,12 @@
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  "assets": {
+    // Force /api/* to the Worker before the assets layer sees the request.
+    // Without this, Cloudflare's static-assets edge can shadow worker
+    // dispatch (SPA fallback, cached HTML, edge defaults), and /api/audit/start
+    // ends up rendered as the React 404 page instead of hitting handleApiRoute.
+    "run_worker_first": ["/api/*"]
+  }
 }
