@@ -10,10 +10,6 @@ export type Env = {
   VITE_SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   OPENAI_API_KEY: string;
-  // Optional: only consumed by callers that don't have access to the
-  // incoming request URL (e.g. createServerFn handlers in src/lib/api/audit.ts).
-  // The plain /api/* handler derives workerUrl from request.url instead.
-  WORKER_URL?: string;
 };
 
 /**

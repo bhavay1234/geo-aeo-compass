@@ -7,25 +7,21 @@ import type { AuditSummary, PollResult, CategoryStats } from '../db/types';
 const BATCH_SIZE = 3;
 
 /**
- * Runs ONE batch of an audit (3 queries) inside the current Cloudflare Worker
- * invocation, then self-invokes for the next batch via HTTP.
+ * Runs an audit end-to-end inside a single Cloudflare Worker invocation:
+ *   1. Fetch audit row
+ *   2. Generate 20 buyer-intent queries
+ *   3. Process them in batches of 3 (parallel within a batch)
+ *   4. Persist poll_results and progress after each batch
+ *   5. Compute summary + visibility score, mark completed
  *
- * Why batched + self-invoking: Cloudflare's ctx.waitUntil() has a ~30s budget
- * after the response returns, but a 20-query audit takes ~60-90s. Each
- * self-invoke is a fresh invocation with its own 30s budget, so the audit
- * can run to completion by chaining 7 invocations.
+ * Tried a self-invoking pattern in Phase 3.12 to multiply waitUntil budgets;
+ * Cloudflare blocks Worker→own-zone fetches (error 1042), so we're back to a
+ * single ctx.waitUntil. Total wall time ~70-100s for 20 queries with
+ * concurrency=3; well under Cloudflare's free-tier ~5 min subrequest budget.
  *
- * Idempotency: this function reads current state from Supabase before doing
- * work. If a batch is re-dispatched (Cloudflare retry, double-invoke), it
- * inserts duplicate poll_results rows — acceptable for v1. v2 should add a
- * unique constraint on (audit_id, query_text).
+ * On failure, marks status='failed' with error_message and returns.
  */
-export async function processBatch(
-  auditId: string,
-  batchIndex: number,
-  env: Env,
-  workerUrl: string
-): Promise<void> {
+export async function runAudit(auditId: string, env: Env): Promise<void> {
   const supabase = getSupabaseAdmin(env);
 
   const { data: audit, error: fetchErr } = await supabase
@@ -39,10 +35,9 @@ export async function processBatch(
     return;
   }
 
-  // Early exit if a previous batch already finalized the audit.
   if (audit.status === 'completed' || audit.status === 'failed') {
     console.log(
-      `[orchestrator] audit ${auditId} already ${audit.status}, skipping batch ${batchIndex}`
+      `[orchestrator] audit ${auditId} already ${audit.status}, skipping`
     );
     return;
   }
@@ -54,119 +49,105 @@ export async function processBatch(
     ? audit.competitors
     : [];
 
+  const queries: BuyerQuery[] = generateQueries(
+    category || 'software',
+    brandName,
+    competitors
+  );
+
+  await supabase
+    .from('audits')
+    .update({
+      status: 'running',
+      progress_total: queries.length,
+      progress_done: 0,
+    })
+    .eq('id', auditId);
+
+  const totalBatches = Math.ceil(queries.length / BATCH_SIZE);
+
   try {
-    const queries: BuyerQuery[] = generateQueries(
-      category || 'software',
-      brandName,
-      competitors
-    );
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const start = batchIndex * BATCH_SIZE;
+      const end = Math.min(start + BATCH_SIZE, queries.length);
+      const batch = queries.slice(start, end);
 
-    const start = batchIndex * BATCH_SIZE;
-    const end = Math.min(start + BATCH_SIZE, queries.length);
-    console.log('[orchestrator] batch', batchIndex, 'start', start, 'end', end);
-
-    // Defensive: someone invoked us past the last batch. Finalize and exit.
-    if (start >= queries.length) {
       console.log(
-        '[orchestrator] start >= queries.length, finalizing without processing'
+        `[orchestrator] batch ${batchIndex} start ${start} end ${end}`
       );
-      await finalize(auditId, brandName, competitors, queries.length, env);
-      return;
-    }
 
-    // First batch flips the audit into "running" with the query total.
-    if (batchIndex === 0 && audit.status === 'pending') {
+      const settled = await Promise.allSettled(
+        batch.map(async (q) => {
+          const result = await pollChatGPT(q.text, env);
+          return { query: q, pollText: result.response_text };
+        })
+      );
+
+      const rows = settled
+        .filter(
+          (s): s is PromiseFulfilledResult<{
+            query: BuyerQuery;
+            pollText: string;
+          }> => s.status === 'fulfilled'
+        )
+        .map((s) => {
+          const { query, pollText } = s.value;
+          const citation = parseCitations(
+            pollText,
+            brandName,
+            domain,
+            competitors
+          );
+          return {
+            audit_id: auditId,
+            query_text: query.text,
+            query_category: query.category,
+            llm_source: 'openai',
+            raw_response: (pollText || '').slice(0, 5000),
+            brand_cited: citation.brand_cited,
+            brand_position: citation.brand_position,
+            competitors_cited: citation.competitors_cited,
+          };
+        });
+
+      if (rows.length > 0) {
+        const { error: insertErr } = await supabase
+          .from('poll_results')
+          .insert(rows);
+        if (insertErr) {
+          console.error('[orchestrator] insert error:', insertErr);
+        }
+      }
+
       await supabase
         .from('audits')
-        .update({
-          status: 'running',
-          progress_total: queries.length,
-          progress_done: 0,
-        })
+        .update({ progress_done: end })
         .eq('id', auditId);
+      console.log(
+        `[orchestrator] batch ${batchIndex} done, progress_done: ${end}`
+      );
     }
 
-    const batch = queries.slice(start, end);
-
-    const batchResults = await Promise.allSettled(
-      batch.map(async (q) => {
-        const result = await pollChatGPT(q.text, env);
-        return { query: q, pollText: result.response_text };
-      })
-    );
-
-    const successful = batchResults
-      .filter(
-        (r): r is PromiseFulfilledResult<{
-          query: BuyerQuery;
-          pollText: string;
-        }> => r.status === 'fulfilled'
-      )
-      .map((r) => r.value);
-
-    const rows = successful.map(({ query, pollText }) => {
-      const citation = parseCitations(pollText, brandName, domain, competitors);
-      return {
-        audit_id: auditId,
-        query_text: query.text,
-        query_category: query.category,
-        llm_source: 'openai',
-        raw_response: (pollText || '').slice(0, 5000),
-        brand_cited: citation.brand_cited,
-        brand_position: citation.brand_position,
-        competitors_cited: citation.competitors_cited,
-      };
-    });
-
-    if (rows.length > 0) {
-      const { error: insertErr } = await supabase
-        .from('poll_results')
-        .insert(rows);
-      if (insertErr) {
-        console.error('[orchestrator] insert error:', insertErr);
-      }
-    }
+    console.log('[orchestrator] all batches complete, computing summary');
+    const summary = await computeSummary(auditId, brandName, competitors, env);
+    const visibilityScore = Math.round(summary.visibility_rate * 100);
 
     await supabase
       .from('audits')
-      .update({ progress_done: end })
+      .update({
+        status: 'completed',
+        progress_done: queries.length,
+        visibility_score: visibilityScore,
+        summary,
+        completed_at: new Date().toISOString(),
+      })
       .eq('id', auditId);
-    console.log(
-      '[orchestrator] batch',
-      batchIndex,
-      'done, progress_done:',
-      end
-    );
 
-    if (end < queries.length) {
-      // Chain to the next batch in a fresh Worker invocation.
-      console.log('[orchestrator] self-invoking batch', batchIndex + 1);
-      try {
-        const response = await fetch(`${workerUrl}/api/audit/process-batch`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            audit_id: auditId,
-            batch_index: batchIndex + 1,
-          }),
-        });
-        if (!response.ok) {
-          console.error(
-            '[orchestrator] self-invoke returned',
-            response.status,
-            await response.text().catch(() => '')
-          );
-        }
-      } catch (err: any) {
-        console.error('[orchestrator] self-invoke failed:', err?.message);
-      }
-    } else {
-      // Last batch — finalize inline so we don't pay an extra invocation.
-      console.log('[orchestrator] all batches complete, computing summary');
-      await finalize(auditId, brandName, competitors, queries.length, env);
-    }
+    console.log(
+      `[orchestrator] audit ${auditId} completed, score: ${visibilityScore}`
+    );
   } catch (error: any) {
-    console.error('[orchestrator] batch failed:', error);
+    console.error('[orchestrator] audit failed:', error);
     await supabase
       .from('audits')
       .update({
@@ -175,31 +156,6 @@ export async function processBatch(
       })
       .eq('id', auditId);
   }
-}
-
-async function finalize(
-  auditId: string,
-  brandName: string,
-  competitors: string[],
-  totalQueries: number,
-  env: Env
-): Promise<void> {
-  const supabase = getSupabaseAdmin(env);
-  const summary = await computeSummary(auditId, brandName, competitors, env);
-  const visibilityScore = Math.round(summary.visibility_rate * 100);
-  await supabase
-    .from('audits')
-    .update({
-      status: 'completed',
-      progress_done: totalQueries,
-      visibility_score: visibilityScore,
-      summary,
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', auditId);
-  console.log(
-    `[orchestrator] audit ${auditId} completed: score=${visibilityScore}`
-  );
 }
 
 /**
@@ -229,7 +185,6 @@ async function computeSummary(
   const cited = pollResults.filter((p) => p.brand_cited).length;
   const visibilityRate = total > 0 ? cited / total : 0;
 
-  // Competitor leaderboard
   const competitorCounts = new Map<string, number>();
   competitors.forEach((c) => competitorCounts.set(c, 0));
 
@@ -250,7 +205,6 @@ async function computeSummary(
   );
   const topCompetitor = competitorRanked[0] || null;
 
-  // Category breakdown
   const categoryBreakdown: Record<string, CategoryStats> = {};
   pollResults.forEach((p) => {
     const cat = p.query_category || 'unknown';
@@ -261,13 +215,11 @@ async function computeSummary(
     if (p.brand_cited) categoryBreakdown[cat].cited++;
   });
 
-  // Top winning queries (cited at position 1 or 2)
   const winning = pollResults
     .filter((p) => p.brand_cited && (p.brand_position || 99) <= 2)
     .slice(0, 5)
     .map((p) => p.query_text);
 
-  // Top losing queries (not cited)
   const losing = pollResults
     .filter((p) => !p.brand_cited)
     .slice(0, 5)
