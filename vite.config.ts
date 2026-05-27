@@ -11,5 +11,13 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 export default defineConfig({
   tanstackStart: {
     server: { entry: "server" },
+    serverFns: {
+      // Default is sha256(filename+functionName) → URLs like /_serverFn/<64-char-hash>.
+      // Use the human-readable function name instead so URLs are /_serverFn/startAudit.
+      // The compiler's name dedup (incrementFunctionNameVersion) handles collisions.
+      generateFunctionId: ({ functionName }) =>
+        functionName.replace(/_createServerFn_handler$/, ""),
+    },
   },
 });
+
