@@ -3,6 +3,7 @@ import "./lib/error-capture";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { runWithRuntime, type ExecutionCtxLike } from "./lib/server/runtime";
+import { handleApiRoute } from "./lib/api/handler";
 import type { Env } from "./lib/db/supabase";
 
 type ServerEntry = {
@@ -71,6 +72,18 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      // Plain-JSON API routes — dispatched before TanStack Start so they
+      // bypass the Seroval-encoded createServerFn RPC protocol. Usable from
+      // any HTTP client. See src/lib/api/handler.ts.
+      const url = new URL(request.url);
+      if (url.pathname.startsWith("/api/")) {
+        return await runWithRuntime(
+          env as Env,
+          ctx as ExecutionCtxLike | null,
+          () => handleApiRoute(request)
+        );
+      }
+
       const handler = await getServerEntry();
       const response = await runWithRuntime(
         env as Env,
