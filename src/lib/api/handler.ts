@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from '../db/supabase';
-import { runAudit } from '../audit/orchestrator';
-import { getEnv, getExecutionCtx } from '../server/runtime';
+import { generateQueries } from '../audit/query-bank';
+import { getEnv } from '../server/runtime';
 
 /**
  * Plain-JSON HTTP API handler for /api/audit/*.
@@ -14,10 +14,11 @@ import { getEnv, getExecutionCtx } from '../server/runtime';
  * Routing is dispatched from src/server.ts before TanStack Start sees the
  * request, so /api/* never enters the createServerFn RPC pipeline.
  *
- * Audit execution: /api/audit/start kicks off runAudit() via ctx.waitUntil.
- * runAudit processes all 20 queries sequentially in batches of 3, ~70-100s
- * total. The self-invoke chaining tried in Phase 3.12 doesn't work on
- * Cloudflare's free tier (error 1042: Worker→own-zone subrequest blocked).
+ * Audit execution (Phase 3.14): /api/audit/start inserts the audit row,
+ * enqueues 20 messages (one per query) to AUDIT_QUEUE, and returns. The
+ * queue() handler in src/server.ts consumes batches of 3 in parallel —
+ * each query gets its own fresh CPU budget, so the free-tier waitUntil
+ * kill (Phase 3.13) no longer applies.
  */
 export async function handleApiRoute(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -39,17 +40,30 @@ export async function handleApiRoute(request: Request): Promise<Response> {
       if (!body.brand_name?.trim()) return jsonError(400, 'brand_name is required');
       if (!body.domain?.trim()) return jsonError(400, 'domain is required');
 
+      const brandName = body.brand_name.trim();
+      const domain = body.domain.trim();
+      const category = body.category?.trim() || null;
+      const competitors = (body.competitors || [])
+        .map((c) => c.trim())
+        .filter(Boolean)
+        .slice(0, 5);
+
+      // Generate queries up-front so we know the exact count for progress_total.
+      const queries = generateQueries(category || 'software', brandName, competitors);
+
+      // Insert audit row already in 'running' state — the queue consumer
+      // will start chewing through messages within a couple seconds and the
+      // UI can show progress immediately instead of a pending blip.
       const { data: audit, error } = await supabase
         .from('audits')
         .insert({
-          brand_name: body.brand_name.trim(),
-          domain: body.domain.trim(),
-          category: body.category?.trim() || null,
-          competitors: (body.competitors || [])
-            .map((c) => c.trim())
-            .filter(Boolean)
-            .slice(0, 5),
-          status: 'pending',
+          brand_name: brandName,
+          domain,
+          category,
+          competitors,
+          status: 'running',
+          progress_total: queries.length,
+          progress_done: 0,
         })
         .select()
         .single();
@@ -59,13 +73,31 @@ export async function handleApiRoute(request: Request): Promise<Response> {
       }
 
       const auditId = audit.id as string;
-      const ctx = getExecutionCtx();
-      if (ctx?.waitUntil) {
-        ctx.waitUntil(runAudit(auditId, env));
-      } else {
-        runAudit(auditId, env).catch((err) => {
-          console.error('[api] background runAudit error:', err);
-        });
+
+      // Fan out to the queue. Each message is one query; consumer is configured
+      // for batches of 3 with max_concurrency=5 (wrangler.jsonc), so the whole
+      // 20-query audit overlaps in parallel across multiple consumer batches.
+      try {
+        await Promise.all(
+          queries.map((q, i) =>
+            env.AUDIT_QUEUE.send({
+              audit_id: auditId,
+              query_text: q.text,
+              query_category: q.category,
+              query_index: i,
+            })
+          )
+        );
+      } catch (enqueueErr: any) {
+        console.error('[api] enqueue failed:', enqueueErr);
+        await supabase
+          .from('audits')
+          .update({
+            status: 'failed',
+            error_message: (enqueueErr?.message || 'enqueue failed').slice(0, 500),
+          })
+          .eq('id', auditId);
+        return jsonError(500, `Failed to enqueue audit: ${enqueueErr?.message || 'unknown'}`);
       }
 
       return Response.json({ audit_id: auditId });

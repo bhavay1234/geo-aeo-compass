@@ -1,0 +1,123 @@
+import { pollChatGPT } from '../llm/openai-client';
+import { parseCitations } from './citation-parser';
+import { getSupabaseAdmin } from '../db/supabase';
+import { computeSummary } from './orchestrator';
+import type { Env, AuditQueueMessage } from '../db/supabase';
+
+/**
+ * Shape of a Cloudflare queue message. We only need `body`; ack/retry
+ * are called on the MessageBatch in src/server.ts.
+ */
+export interface QueueMessageLike<T> {
+  body: T;
+}
+
+/**
+ * Consumer for the audit-jobs queue. Cloudflare delivers up to
+ * `max_batch_size` (3) messages per invocation; we process them in
+ * parallel, save each poll_result, atomically bump progress_done,
+ * and finalize any audits that hit progress_done >= progress_total
+ * inside this batch.
+ *
+ * Errors on individual queries are caught locally so one bad query
+ * doesn't poison a batch ack. If the whole batch throws (e.g. Supabase
+ * is down), src/server.ts calls batch.retryAll().
+ */
+export async function processQueueBatch(
+  messages: Array<QueueMessageLike<AuditQueueMessage>>,
+  env: Env
+): Promise<void> {
+  const supabase = getSupabaseAdmin(env);
+  const auditIdsToCheck = new Set<string>();
+
+  await Promise.allSettled(
+    messages.map(async (msg) => {
+      const { audit_id, query_text, query_category } = msg.body;
+      auditIdsToCheck.add(audit_id);
+
+      try {
+        const { data: audit, error: auditErr } = await supabase
+          .from('audits')
+          .select('*')
+          .eq('id', audit_id)
+          .single();
+
+        if (auditErr || !audit) {
+          console.error(`[queue] audit ${audit_id} not found:`, auditErr);
+          return;
+        }
+
+        const result = await pollChatGPT(query_text, env);
+        const citation = parseCitations(
+          result.response_text,
+          audit.brand_name,
+          audit.domain,
+          (audit.competitors as string[]) || []
+        );
+
+        await supabase.from('poll_results').insert({
+          audit_id,
+          query_text,
+          query_category,
+          llm_source: 'openai',
+          raw_response: (result.response_text || '').slice(0, 5000),
+          brand_cited: citation.brand_cited,
+          brand_position: citation.brand_position,
+          competitors_cited: citation.competitors_cited,
+        });
+
+        // Atomic counter bump via Postgres function — avoids the read/write
+        // race that would happen if we SELECT then UPDATE across parallel
+        // consumer workers.
+        await supabase.rpc('increment_progress', {
+          audit_id_param: audit_id,
+        });
+
+        console.log(`[queue] processed: ${query_text.slice(0, 60)}`);
+      } catch (err: any) {
+        console.error(
+          `[queue] error processing query "${query_text}":`,
+          err?.message || err
+        );
+      }
+    })
+  );
+
+  // After all messages in this batch are persisted, check each touched audit
+  // for completion. The last consumer that bumps progress_done to total runs
+  // the finalize. If two consumers race and both see the threshold, the
+  // second one's update is a harmless no-op (status flip is idempotent).
+  for (const auditId of auditIdsToCheck) {
+    const { data: audit } = await supabase
+      .from('audits')
+      .select('*')
+      .eq('id', auditId)
+      .single();
+
+    if (!audit) continue;
+    if (audit.status === 'completed' || audit.status === 'failed') continue;
+    if ((audit.progress_done ?? 0) < (audit.progress_total ?? 0)) continue;
+
+    const summary = await computeSummary(
+      auditId,
+      audit.brand_name,
+      (audit.competitors as string[]) || [],
+      env
+    );
+    const visibilityScore = Math.round((summary.visibility_rate ?? 0) * 100);
+
+    await supabase
+      .from('audits')
+      .update({
+        status: 'completed',
+        visibility_score: visibilityScore,
+        summary,
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', auditId);
+
+    console.log(
+      `[queue] audit ${auditId} COMPLETED, score: ${visibilityScore}`
+    );
+  }
+}

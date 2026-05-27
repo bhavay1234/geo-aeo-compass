@@ -4,7 +4,15 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { runWithRuntime, type ExecutionCtxLike } from "./lib/server/runtime";
 import { handleApiRoute } from "./lib/api/handler";
-import type { Env } from "./lib/db/supabase";
+import { processQueueBatch } from "./lib/audit/queue-consumer";
+import type { Env, AuditQueueMessage } from "./lib/db/supabase";
+
+// Minimal shape of Cloudflare's MessageBatch — only the bits we use.
+type MessageBatchLike<T> = {
+  messages: Array<{ body: T }>;
+  ackAll: () => void;
+  retryAll: () => void;
+};
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -97,5 +105,29 @@ export default {
       console.error(error);
       return brandedErrorResponse();
     }
+  },
+
+  // Cloudflare Queues consumer — invoked once per batch from audit-jobs.
+  // wrappped in runWithRuntime so getEnv() in downstream code works the same
+  // way as it does in fetch handlers.
+  async queue(
+    batch: MessageBatchLike<AuditQueueMessage>,
+    env: unknown,
+    ctx: unknown
+  ) {
+    console.log("[server.ts:queue] batch size:", batch.messages.length);
+    return await runWithRuntime(
+      env as Env,
+      ctx as ExecutionCtxLike | null,
+      async () => {
+        try {
+          await processQueueBatch(batch.messages, env as Env);
+          batch.ackAll();
+        } catch (err) {
+          console.error("[queue] batch processing failed:", err);
+          batch.retryAll();
+        }
+      }
+    );
   },
 };

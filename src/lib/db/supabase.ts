@@ -1,15 +1,40 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /**
+ * Message body for the audit-jobs queue. One message per query — the
+ * consumer fans out, polls ChatGPT, and writes a poll_results row.
+ */
+export interface AuditQueueMessage {
+  audit_id: string;
+  query_text: string;
+  query_category: string;
+  query_index: number;
+}
+
+/**
+ * Minimal shape of Cloudflare's Queue binding. We don't depend on
+ * @cloudflare/workers-types — just the one method we call.
+ */
+export interface QueueBinding<T> {
+  send(message: T, options?: { contentType?: string; delaySeconds?: number }): Promise<void>;
+  sendBatch(
+    messages: Array<{ body: T; contentType?: string; delaySeconds?: number }>
+  ): Promise<void>;
+}
+
+/**
  * Cloudflare Workers environment bindings.
- * These are set in Cloudflare dashboard:
+ * Plaintext + secrets are set in Cloudflare dashboard:
  *   Workers & Pages → geo-aeo-compass → Settings → Variables and Secrets
+ * VITE_SUPABASE_URL is also pinned in wrangler.jsonc to prevent stripping.
+ * AUDIT_QUEUE is provided by the queues.producers binding in wrangler.jsonc.
  */
 export type Env = {
   VITE_SUPABASE_URL: string;
   VITE_SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   OPENAI_API_KEY: string;
+  AUDIT_QUEUE: QueueBinding<AuditQueueMessage>;
 };
 
 /**

@@ -167,7 +167,7 @@ export async function runAudit(auditId: string, env: Env): Promise<void> {
  * - Top losing queries (brand not cited at all)
  * - Headline copy
  */
-async function computeSummary(
+export async function computeSummary(
   auditId: string,
   brandName: string,
   competitors: string[],

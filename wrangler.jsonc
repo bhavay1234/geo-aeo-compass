@@ -18,6 +18,25 @@
     // Secrets (OPENAI_API_KEY, SUPABASE_SERVICE_ROLE_KEY, VITE_SUPABASE_ANON_KEY)
     // stay in the dashboard — DO NOT add them here.
     "VITE_SUPABASE_URL": "https://saxyymcncoxkkiajatkz.supabase.co"
+  },
+  "queues": {
+    // Producer: POST /api/audit/start enqueues 20 messages (one per query).
+    // Consumer: queue() handler in src/server.ts pulls batches of 3 in
+    // parallel — each query gets its own fresh CPU budget, sidestepping
+    // the free-tier waitUntil() kill that capped audits at ~6 queries.
+    "producers": [
+      { "queue": "audit-jobs", "binding": "AUDIT_QUEUE" }
+    ],
+    "consumers": [
+      {
+        "queue": "audit-jobs",
+        "max_batch_size": 3,
+        "max_batch_timeout": 2,
+        "max_retries": 2,
+        "max_concurrency": 5
+      }
+    ]
   }
 }
+
 
