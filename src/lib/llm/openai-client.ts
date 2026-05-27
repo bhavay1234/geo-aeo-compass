@@ -33,11 +33,26 @@ export async function pollChatGPT(
 
     const response = await pRetry(
       async () => {
-        return await openai.chat.completions.create({
-          model: MODEL,
-          messages: [{ role: 'user', content: query }],
-          max_tokens: 800,
-        });
+        // Per-attempt 20s timeout. Without this, a hung OpenAI request
+        // can eat the entire Cloudflare invocation budget and kill the
+        // batch chain. Race against a timeout, clear the timer on settle.
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const completionPromise = openai.chat.completions.create({
+            model: MODEL,
+            messages: [{ role: 'user', content: query }],
+            max_tokens: 800,
+          });
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(
+              () => reject(new Error('OpenAI timeout 20s')),
+              20000
+            );
+          });
+          return await Promise.race([completionPromise, timeoutPromise]);
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+        }
       },
       {
         retries: 3,

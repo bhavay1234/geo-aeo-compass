@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from '../db/supabase';
-import { runAudit } from '../audit/orchestrator';
+import { processBatch } from '../audit/orchestrator';
 import { getEnv, getExecutionCtx } from '../server/runtime';
 
 /**
@@ -11,17 +11,21 @@ import { getEnv, getExecutionCtx } from '../server/runtime';
  * tests fail with a deserialization error. These routes accept plain JSON
  * so curl, Postman, and ad-hoc browser-console tests work.
  *
- * The React UI in Phase 4 can call either layer:
- *   - useServerFn(startAudit)  — typed, uses Seroval
- *   - fetch('/api/audit/start') — plain JSON, this file
- *
  * Routing is dispatched from src/server.ts before TanStack Start sees the
  * request, so /api/* never enters the createServerFn RPC pipeline.
+ *
+ * Audit execution uses a self-invoking batched pattern:
+ *   /api/audit/start         — kicks off batch 0
+ *   /api/audit/process-batch — internal endpoint, each invocation handles
+ *                              one batch of ~3 queries and chains to the
+ *                              next via fetch(). Each chain link gets a
+ *                              fresh Cloudflare ctx.waitUntil() budget.
  */
 export async function handleApiRoute(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
   const method = request.method.toUpperCase();
+  const workerUrl = url.origin;
 
   try {
     const env = getEnv();
@@ -60,14 +64,45 @@ export async function handleApiRoute(request: Request): Promise<Response> {
       const auditId = audit.id as string;
       const ctx = getExecutionCtx();
       if (ctx?.waitUntil) {
-        ctx.waitUntil(runAudit(auditId, env));
+        ctx.waitUntil(processBatch(auditId, 0, env, workerUrl));
       } else {
-        runAudit(auditId, env).catch((err) => {
-          console.error('[api] background runAudit error:', err);
+        processBatch(auditId, 0, env, workerUrl).catch((err) => {
+          console.error('[api] background processBatch error:', err);
         });
       }
 
       return Response.json({ audit_id: auditId });
+    }
+
+    // Internal self-invoke endpoint used by the orchestrator to chain
+    // batches across Worker invocations. No auth — anyone could trigger
+    // a re-process of an existing audit. v2: add HMAC signing.
+    if (path === '/api/audit/process-batch' && method === 'POST') {
+      const body = (await request.json().catch(() => ({}))) as {
+        audit_id?: string;
+        batch_index?: number;
+      };
+
+      const auditId = body.audit_id?.trim();
+      const batchIndex = body.batch_index;
+      if (!auditId) return jsonError(400, 'audit_id is required');
+      if (typeof batchIndex !== 'number' || batchIndex < 0 || !Number.isInteger(batchIndex)) {
+        return jsonError(400, 'batch_index must be a non-negative integer');
+      }
+
+      const ctx = getExecutionCtx();
+      if (ctx?.waitUntil) {
+        ctx.waitUntil(processBatch(auditId, batchIndex, env, workerUrl));
+      } else {
+        processBatch(auditId, batchIndex, env, workerUrl).catch((err) => {
+          console.error('[api] background processBatch error:', err);
+        });
+      }
+
+      return new Response(
+        JSON.stringify({ audit_id: auditId, batch_index: batchIndex }),
+        { status: 202, headers: { 'Content-Type': 'application/json' } }
+      );
     }
 
     if (path === '/api/audit/status' && method === 'GET') {

@@ -4,24 +4,30 @@ import { generateQueries, type BuyerQuery } from './query-bank';
 import { getSupabaseAdmin, type Env } from '../db/supabase';
 import type { AuditSummary, PollResult, CategoryStats } from '../db/types';
 
+const BATCH_SIZE = 3;
+
 /**
- * Runs an audit end-to-end:
- *   1. Fetch audit row from DB
- *   2. Generate 20 buyer-intent queries
- *   3. Poll ChatGPT for each (with concurrency control)
- *   4. Parse citations from each response
- *   5. Save poll_results rows to Supabase
- *   6. Update audit progress as we go
- *   7. Compute final summary + visibility_score
- *   8. Mark audit as completed
+ * Runs ONE batch of an audit (3 queries) inside the current Cloudflare Worker
+ * invocation, then self-invokes for the next batch via HTTP.
  *
- * Errors are caught at every step. If anything fails, the audit is
- * marked status='failed' with error_message set.
+ * Why batched + self-invoking: Cloudflare's ctx.waitUntil() has a ~30s budget
+ * after the response returns, but a 20-query audit takes ~60-90s. Each
+ * self-invoke is a fresh invocation with its own 30s budget, so the audit
+ * can run to completion by chaining 7 invocations.
+ *
+ * Idempotency: this function reads current state from Supabase before doing
+ * work. If a batch is re-dispatched (Cloudflare retry, double-invoke), it
+ * inserts duplicate poll_results rows — acceptable for v1. v2 should add a
+ * unique constraint on (audit_id, query_text).
  */
-export async function runAudit(auditId: string, env: Env): Promise<void> {
+export async function processBatch(
+  auditId: string,
+  batchIndex: number,
+  env: Env,
+  workerUrl: string
+): Promise<void> {
   const supabase = getSupabaseAdmin(env);
 
-  // Step 1: Fetch audit
   const { data: audit, error: fetchErr } = await supabase
     .from('audits')
     .select('*')
@@ -29,7 +35,15 @@ export async function runAudit(auditId: string, env: Env): Promise<void> {
     .single();
 
   if (fetchErr || !audit) {
-    console.error('[orchestrator] Audit not found:', auditId, fetchErr);
+    console.error('[orchestrator] audit not found:', auditId, fetchErr);
+    return;
+  }
+
+  // Early exit if a previous batch already finalized the audit.
+  if (audit.status === 'completed' || audit.status === 'failed') {
+    console.log(
+      `[orchestrator] audit ${auditId} already ${audit.status}, skipping batch ${batchIndex}`
+    );
     return;
   }
 
@@ -41,113 +55,118 @@ export async function runAudit(auditId: string, env: Env): Promise<void> {
     : [];
 
   try {
-    // Step 2: Generate queries
     const queries: BuyerQuery[] = generateQueries(
       category || 'software',
       brandName,
       competitors
     );
 
-    // Step 3: Mark audit as running
-    await supabase
-      .from('audits')
-      .update({
-        status: 'running',
-        progress_total: queries.length,
-        progress_done: 0,
-      })
-      .eq('id', auditId);
+    const start = batchIndex * BATCH_SIZE;
+    const end = Math.min(start + BATCH_SIZE, queries.length);
+    console.log('[orchestrator] batch', batchIndex, 'start', start, 'end', end);
 
-    // Step 4: Process queries with concurrency = 3
-    // Higher concurrency = faster, but more rate limit risk
-    const concurrency = 3;
-    let completed = 0;
-
-    for (let i = 0; i < queries.length; i += concurrency) {
-      const batch = queries.slice(i, i + concurrency);
-
-      // Run batch in parallel
-      const batchResults = await Promise.allSettled(
-        batch.map(async (q) => {
-          const result = await pollChatGPT(q.text, env);
-          return { query: q, pollText: result.response_text };
-        })
+    // Defensive: someone invoked us past the last batch. Finalize and exit.
+    if (start >= queries.length) {
+      console.log(
+        '[orchestrator] start >= queries.length, finalizing without processing'
       );
+      await finalize(auditId, brandName, competitors, queries.length, env);
+      return;
+    }
 
-      // Extract successful polls
-      const successful = batchResults
-        .filter(
-          (r): r is PromiseFulfilledResult<{
-            query: BuyerQuery;
-            pollText: string;
-          }> => r.status === 'fulfilled'
-        )
-        .map((r) => r.value);
-
-      // Build rows to insert
-      const rows = successful.map(({ query, pollText }) => {
-        const citation = parseCitations(
-          pollText,
-          brandName,
-          domain,
-          competitors
-        );
-        return {
-          audit_id: auditId,
-          query_text: query.text,
-          query_category: query.category,
-          llm_source: 'openai',
-          raw_response: (pollText || '').slice(0, 5000),
-          brand_cited: citation.brand_cited,
-          brand_position: citation.brand_position,
-          competitors_cited: citation.competitors_cited,
-        };
-      });
-
-      // Insert poll_results
-      if (rows.length > 0) {
-        const { error: insertErr } = await supabase
-          .from('poll_results')
-          .insert(rows);
-        if (insertErr) {
-          console.error('[orchestrator] Insert error:', insertErr);
-        }
-      }
-
-      // Update progress
-      completed = Math.min(i + concurrency, queries.length);
+    // First batch flips the audit into "running" with the query total.
+    if (batchIndex === 0 && audit.status === 'pending') {
       await supabase
         .from('audits')
-        .update({ progress_done: completed })
+        .update({
+          status: 'running',
+          progress_total: queries.length,
+          progress_done: 0,
+        })
         .eq('id', auditId);
     }
 
-    // Step 5: Compute summary
-    const summary = await computeSummary(
-      auditId,
-      brandName,
-      competitors,
-      env
-    );
-    const visibilityScore = Math.round(summary.visibility_rate * 100);
+    const batch = queries.slice(start, end);
 
-    // Step 6: Mark completed
+    const batchResults = await Promise.allSettled(
+      batch.map(async (q) => {
+        const result = await pollChatGPT(q.text, env);
+        return { query: q, pollText: result.response_text };
+      })
+    );
+
+    const successful = batchResults
+      .filter(
+        (r): r is PromiseFulfilledResult<{
+          query: BuyerQuery;
+          pollText: string;
+        }> => r.status === 'fulfilled'
+      )
+      .map((r) => r.value);
+
+    const rows = successful.map(({ query, pollText }) => {
+      const citation = parseCitations(pollText, brandName, domain, competitors);
+      return {
+        audit_id: auditId,
+        query_text: query.text,
+        query_category: query.category,
+        llm_source: 'openai',
+        raw_response: (pollText || '').slice(0, 5000),
+        brand_cited: citation.brand_cited,
+        brand_position: citation.brand_position,
+        competitors_cited: citation.competitors_cited,
+      };
+    });
+
+    if (rows.length > 0) {
+      const { error: insertErr } = await supabase
+        .from('poll_results')
+        .insert(rows);
+      if (insertErr) {
+        console.error('[orchestrator] insert error:', insertErr);
+      }
+    }
+
     await supabase
       .from('audits')
-      .update({
-        status: 'completed',
-        progress_done: queries.length,
-        visibility_score: visibilityScore,
-        summary,
-        completed_at: new Date().toISOString(),
-      })
+      .update({ progress_done: end })
       .eq('id', auditId);
-
     console.log(
-      `[orchestrator] Audit ${auditId} completed: score=${visibilityScore}`
+      '[orchestrator] batch',
+      batchIndex,
+      'done, progress_done:',
+      end
     );
+
+    if (end < queries.length) {
+      // Chain to the next batch in a fresh Worker invocation.
+      console.log('[orchestrator] self-invoking batch', batchIndex + 1);
+      try {
+        const response = await fetch(`${workerUrl}/api/audit/process-batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            audit_id: auditId,
+            batch_index: batchIndex + 1,
+          }),
+        });
+        if (!response.ok) {
+          console.error(
+            '[orchestrator] self-invoke returned',
+            response.status,
+            await response.text().catch(() => '')
+          );
+        }
+      } catch (err: any) {
+        console.error('[orchestrator] self-invoke failed:', err?.message);
+      }
+    } else {
+      // Last batch — finalize inline so we don't pay an extra invocation.
+      console.log('[orchestrator] all batches complete, computing summary');
+      await finalize(auditId, brandName, competitors, queries.length, env);
+    }
   } catch (error: any) {
-    console.error('[orchestrator] Audit failed:', error);
+    console.error('[orchestrator] batch failed:', error);
     await supabase
       .from('audits')
       .update({
@@ -156,6 +175,31 @@ export async function runAudit(auditId: string, env: Env): Promise<void> {
       })
       .eq('id', auditId);
   }
+}
+
+async function finalize(
+  auditId: string,
+  brandName: string,
+  competitors: string[],
+  totalQueries: number,
+  env: Env
+): Promise<void> {
+  const supabase = getSupabaseAdmin(env);
+  const summary = await computeSummary(auditId, brandName, competitors, env);
+  const visibilityScore = Math.round(summary.visibility_rate * 100);
+  await supabase
+    .from('audits')
+    .update({
+      status: 'completed',
+      progress_done: totalQueries,
+      visibility_score: visibilityScore,
+      summary,
+      completed_at: new Date().toISOString(),
+    })
+    .eq('id', auditId);
+  console.log(
+    `[orchestrator] audit ${auditId} completed: score=${visibilityScore}`
+  );
 }
 
 /**
@@ -229,7 +273,6 @@ async function computeSummary(
     .slice(0, 5)
     .map((p) => p.query_text);
 
-  // Headline copy
   let headline: string;
   if (visibilityRate >= 0.7) {
     headline = `${brandName} is cited in ${cited} of ${total} buyer queries on ChatGPT. Strong AEO position.`;

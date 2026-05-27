@@ -1,6 +1,6 @@
 import { createServerFn } from '@tanstack/react-start';
 import { getSupabaseAdmin } from '../db/supabase';
-import { runAudit } from '../audit/orchestrator';
+import { processBatch } from '../audit/orchestrator';
 import { getEnv, getExecutionCtx } from '../server/runtime';
 
 /**
@@ -54,14 +54,19 @@ export const startAudit = createServerFn({ method: 'POST' })
       );
     }
 
-    // Fire the audit asynchronously. ctx.waitUntil keeps it alive
-    // after we return. If ctx isn't available (rare), fall back to
-    // fire-and-forget — works in local dev.
+    // Fire batch 0 asynchronously. processBatch self-invokes via fetch
+    // for subsequent batches, so each chain link gets a fresh Cloudflare
+    // ctx.waitUntil() budget. createServerFn callers don't have request.url
+    // readily available, so we fall back to env.WORKER_URL (must be set
+    // in Cloudflare dashboard for this code path to chain correctly).
+    // The plain /api/audit/start endpoint derives workerUrl from request.url
+    // and doesn't need this env var.
+    const workerUrl = env.WORKER_URL || '';
     const ctx = getExecutionCtx();
     if (ctx?.waitUntil) {
-      ctx.waitUntil(runAudit(audit.id, env));
+      ctx.waitUntil(processBatch(audit.id, 0, env, workerUrl));
     } else {
-      runAudit(audit.id, env).catch((err) => {
+      processBatch(audit.id, 0, env, workerUrl).catch((err) => {
         console.error('[startAudit] background error:', err);
       });
     }
