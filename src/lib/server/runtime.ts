@@ -30,11 +30,21 @@ export function runWithRuntime<T>(
   ctx: ExecutionCtxLike | null | undefined,
   fn: () => T
 ): T {
+  // PHASE 3.10 DIAGNOSTIC — remove after env binding confirmed working
+  console.log(
+    '[runtime.ts] storing env keys:',
+    Object.keys((env as object) || {})
+  );
   return runtimeStorage.run({ env, ctx: ctx ?? null }, fn);
 }
 
 export function getEnv(): Env {
   const runtime = runtimeStorage.getStore();
+  // PHASE 3.10 DIAGNOSTIC — remove after env binding confirmed working
+  console.log(
+    '[runtime.ts] getEnv returning keys:',
+    Object.keys((runtime?.env as object) || {})
+  );
   if (!runtime?.env) {
     throw new Error(
       'Worker runtime not initialized — env unavailable. ' +

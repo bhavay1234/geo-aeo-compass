@@ -71,6 +71,8 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    // PHASE 3.10 DIAGNOSTIC — remove after env binding confirmed working
+    console.log("[server.ts] env keys:", Object.keys((env as object) || {}));
     try {
       // Plain-JSON API routes — dispatched before TanStack Start so they
       // bypass the Seroval-encoded createServerFn RPC protocol. Usable from
