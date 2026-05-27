@@ -10,6 +10,15 @@ import {
 
 import appCss from "../styles.css?url";
 
+// Side-effect import: forces Vite's TanStack Start plugin to transform this
+// module so its createServerFn() calls land in the server-fn resolver
+// manifest. Without an import, /_serverFn/* requests fail with
+// "Server function info not found". Located outside src/lib/server/ to
+// avoid the lovable preset's `**/server/**` client-import denial — the
+// createServerFn() calls in this file are isomorphic-safe; their handler
+// bodies are stripped from the client bundle by the Vite plugin.
+import "../lib/api/audit";
+
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">

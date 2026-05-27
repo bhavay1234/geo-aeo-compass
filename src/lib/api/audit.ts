@@ -1,7 +1,7 @@
 import { createServerFn } from '@tanstack/react-start';
 import { getSupabaseAdmin } from '../db/supabase';
 import { runAudit } from '../audit/orchestrator';
-import { getEnv, getExecutionCtx } from './runtime';
+import { getEnv, getExecutionCtx } from '../server/runtime';
 
 /**
  * POST /api/audit/start
