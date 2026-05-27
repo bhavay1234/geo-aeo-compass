@@ -11,5 +11,13 @@
     // dispatch (SPA fallback, cached HTML, edge defaults), and /api/audit/start
     // ends up rendered as the React 404 page instead of hitting handleApiRoute.
     "run_worker_first": ["/api/*"]
+  },
+  "vars": {
+    // Public URL — safe to commit. Source-controlled so deploys don't strip it
+    // (dashboard plaintext vars have been getting wiped on redeploy).
+    // Secrets (OPENAI_API_KEY, SUPABASE_SERVICE_ROLE_KEY, VITE_SUPABASE_ANON_KEY)
+    // stay in the dashboard — DO NOT add them here.
+    "VITE_SUPABASE_URL": "https://saxyymcncoxkkiajatkz.supabase.co"
   }
 }
+
