@@ -193,6 +193,8 @@ function QueryRow({
       .map((r) => normalizeDomain(r.domain))
   );
 
+  const analyzing = audit.citation_status !== "done";
+
   // BRANDS NAMED in the prose — the real competitor signal (≠ cited domains).
   const namedSet = new Set((audit.competitors ?? []).map((c) => c.toLowerCase()));
   const recommended = recommendedBrands(poll, audit.brand_name).map((name) => ({
@@ -260,6 +262,41 @@ function QueryRow({
                 </>
               )}
             </div>
+
+            {/* Why ChatGPT cites the competitor sources here (deterministic). */}
+            {poll.why_cited && poll.why_cited.length > 0 ? (
+              <div style={{ marginTop: 20 }}>
+                <div className="lbl">Why these are cited</div>
+                {poll.why_cited.map((w, i) => (
+                  <div key={i} style={{ marginBottom: 12 }}>
+                    <div
+                      className="mono"
+                      style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)" }}
+                    >
+                      {w.domain}
+                    </div>
+                    <p
+                      className="nar"
+                      style={{
+                        fontSize: 14,
+                        lineHeight: 1.5,
+                        color: "var(--ink-2)",
+                        marginTop: 2,
+                      }}
+                    >
+                      {w.verdict}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ) : analyzing ? (
+              <div style={{ marginTop: 20 }}>
+                <div className="lbl">Why these are cited</div>
+                <p className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                  ◴ analyzing on-page signals…
+                </p>
+              </div>
+            ) : null}
           </div>
           <div className="tm-srcs">
             {/* Panel 1: the competitor signal — brands NAMED in the prose. */}

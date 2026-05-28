@@ -4,6 +4,7 @@ import { classifySource, competitorToDomain } from './source-classifier';
 import { buildSuggestion } from './suggestion-engine';
 import { getSupabaseAdmin } from '../db/supabase';
 import { finalizeAuditFast, enrichAudit } from './orchestrator';
+import { analyzeCitations } from './citation-analysis';
 import type { Citation, InlineCitation } from '../db/types';
 import type { Env, AuditQueueMessage } from '../db/supabase';
 
@@ -44,6 +45,18 @@ export async function processQueueBatch(
   await Promise.allSettled(
     messages.map(async (msg) => {
       const { audit_id, query_text, query_category } = msg.body;
+
+      // Dedicated post-finalize stage: citation/why-cited analysis for the whole
+      // audit. Runs in its own queue invocation (fresh CPU budget), not a query.
+      if (msg.body.kind === 'citations') {
+        try {
+          await analyzeCitations(audit_id, env);
+        } catch (err: any) {
+          console.error(`[queue] citation analysis failed for ${audit_id}:`, err?.message || err);
+        }
+        return;
+      }
+
       auditIdsToCheck.add(audit_id);
 
       try {
@@ -180,6 +193,19 @@ export async function processQueueBatch(
     const claimed = await finalizeAuditFast(auditId, env);
     if (claimed) {
       await enrichAudit(auditId, env);
+      // Kick off citation analysis in its own queue invocation — enrich has
+      // written citation_roles by now, which the vendor/competitor split needs.
+      try {
+        await env.AUDIT_QUEUE.send({
+          audit_id: auditId,
+          query_text: '',
+          query_category: '',
+          query_index: -1,
+          kind: 'citations',
+        });
+      } catch (err: any) {
+        console.error(`[queue] failed to enqueue citations for ${auditId}:`, err?.message || err);
+      }
     }
   }
 }

@@ -9,6 +9,9 @@ export interface AuditQueueMessage {
   query_text: string;
   query_category: string;
   query_index: number;
+  /** 'query' (default) = poll ChatGPT for this query. 'citations' = run the
+   *  post-finalize citation/why-cited analysis stage for the whole audit. */
+  kind?: "query" | "citations";
 }
 
 /**
@@ -34,6 +37,8 @@ export type Env = {
   VITE_SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   OPENAI_API_KEY: string;
+  /** Apify API token — Worker secret + .dev.vars. Never log or expose. */
+  APIFY_TOKEN: string;
   AUDIT_QUEUE: QueueBinding<AuditQueueMessage>;
 };
 

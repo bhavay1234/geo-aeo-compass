@@ -16,6 +16,7 @@ import type { Audit } from "@/lib/db/types";
 const TABS = [
   { key: "summary", label: "Summary", glyph: "◧", to: "/summary" as const },
   { key: "queries", label: "Queries", glyph: "⌕", to: "/queries" as const },
+  { key: "citations", label: "Citations", glyph: "❖", to: "/citations" as const },
   { key: "competitors", label: "Competitors", glyph: "⚇", to: "/competitors" as const },
   { key: "actions", label: "Actionables", glyph: "⚡", to: "/actions" as const },
   { key: "analytics", label: "Analytics", glyph: "▤", to: "/analytics" as const },
@@ -140,6 +141,7 @@ export function TabNav() {
 
   const counts: Record<string, number> = {
     queries: polls.length,
+    citations: audit?.citation_analysis?.length ?? 0,
     competitors: audit ? allCompetitorBrands(audit, polls).length : 0,
     actions: polls.filter(
       (p) => p.suggestion && p.suggestion.situation !== "winning"

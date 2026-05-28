@@ -52,6 +52,58 @@ interface Action {
   severity: Suggestion["severity"];
 }
 
+function pageLabel(t: "dedicated" | "blog" | "other"): string {
+  return t === "blog" ? "blog post" : t === "dedicated" ? "dedicated page" : "general page";
+}
+
+/**
+ * Precise action + effort derived from OUR own page vs what the cited
+ * competitors have (Part 4). Returns null until citation analysis has run, so
+ * the caller falls back to the deterministic LLM suggestion.
+ */
+function refineAction(p: PollResult, query: string): { title: string; effort: number } | null {
+  const own = p.own_page;
+  if (!own) return null;
+  const comps = p.why_cited ?? [];
+  const compHasSchema = comps.some((c) => c.factors.schema_richness.length > 0);
+  const compDeep = comps.some((c) => c.factors.content_depth >= 800);
+  const compDedicated = comps.some((c) => c.factors.page_type === "dedicated");
+
+  if (!own.exists) {
+    const wants: string[] = [];
+    if (compDedicated) wants.push("dedicated pages");
+    if (compDeep) wants.push("in-depth content");
+    if (compHasSchema) wants.push("FAQPage/Organization schema");
+    const tail = wants.length ? ` Competitors win here with ${wants.join(", ")}.` : "";
+    return { title: `Build a dedicated page targeting “${query}”.${tail}`, effort: 4 };
+  }
+
+  const gaps: string[] = [];
+  let effort = 1;
+  if (own.page_type !== "dedicated" && compDedicated) {
+    gaps.push(`it's a ${pageLabel(own.page_type)}`);
+    effort++;
+  }
+  if (compHasSchema && own.schema_types.length === 0) {
+    gaps.push("has no schema");
+    effort++;
+  }
+  if (compDeep && own.word_count < 800) {
+    gaps.push("is thin on content");
+    effort++;
+  }
+  if (!own.on_page_targeting) {
+    gaps.push("doesn't target the query in its title");
+    effort++;
+  }
+  const url = own.url ? own.url.replace(/^https?:\/\//, "") : "a page";
+  const gapText = gaps.length ? ` but ${gaps.join(", ")}` : "";
+  return {
+    title: `You have ${url}${gapText} — upgrade it to win “${query}”.`,
+    effort: Math.min(5, Math.max(1, effort)),
+  };
+}
+
 function ActionsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const actions: Action[] = polls
     .filter((p) => p.suggestion && p.suggestion.situation !== "winning")
@@ -59,12 +111,17 @@ function ActionsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
       const state = queryState(p);
       const who = whoCited(p, audit.brand_name);
       const impact = state === "absent" ? 3 + Math.min(2, who.length) : 2;
-      const effort = state === "absent" ? 4 : 2; // building new surface vs strengthening
+      const refined = refineAction(p, p.query_text);
+      const effort = refined
+        ? refined.effort
+        : state === "absent"
+          ? 4
+          : 2; // pre-analysis heuristic
       return {
         id: p.id,
         query: p.query_text,
         state,
-        title: p.suggestion!.action,
+        title: refined ? refined.title : p.suggestion!.action,
         who,
         sources: (p.citations ?? []).length,
         impact: Math.min(5, impact),

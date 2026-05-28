@@ -47,6 +47,14 @@ export function Workspace({ children }: { children: ReactNode }) {
       ) {
         return 4000; // enrichment landing → tiers/suggestions upgrade live
       }
+      if (
+        a.status === "completed" &&
+        a.citation_status !== "done" &&
+        a.completed_at != null &&
+        Date.now() - new Date(a.completed_at).getTime() < 300_000
+      ) {
+        return 5000; // citation/why analysis landing → tabs upgrade live
+      }
       return false;
     },
   });

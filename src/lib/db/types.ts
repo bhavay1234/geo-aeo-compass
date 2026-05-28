@@ -123,6 +123,62 @@ export interface BrandVerdict {
   verdict: string;
 }
 
+/** Page type heuristic for a cited/own page. */
+export type PageType = "dedicated" | "blog" | "other";
+
+/** Brand-agnostic on-page signals for a single URL (cached in citation_pages). */
+export interface PageSignals {
+  url: string;
+  root_domain: string;
+  http_status: number;
+  title: string;
+  h1: string;
+  word_count: number;
+  schema_types: string[]; // JSON-LD @types: Organization, Product, FAQPage, Review, Article…
+  has_meta_desc: boolean;
+  has_canonical: boolean;
+  page_type: PageType;
+  analyzed_via: "fetch" | "apify";
+}
+
+/** Per-cited-source rollup for the Citations tab (audits.citation_analysis). */
+export interface CitationAnalysisEntry {
+  url: string;
+  domain: string;
+  source_type: SourceType;
+  query_count: number;
+  brand_present: boolean;
+  match_type: "name" | "domain" | "none";
+}
+
+/** Factor scores behind a deterministic "why cited" verdict. */
+export interface WhyFactors {
+  on_page_targeting: boolean; // query terms in title/H1
+  content_depth: number; // word count
+  schema_richness: string[]; // schema types present
+  page_type: PageType;
+  domain_freq: number; // # queries this domain is cited across (authority proxy)
+}
+
+/** "Why is this source cited" for one cited vendor URL in one query. */
+export interface WhyCited {
+  brand: string;
+  url: string;
+  domain: string;
+  factors: WhyFactors;
+  verdict: string; // deterministic, template-built — no LLM
+}
+
+/** The target's most-relevant existing page for a query (Part 4 / Actionables). */
+export interface OwnPage {
+  exists: boolean;
+  url: string | null;
+  page_type: PageType;
+  schema_types: string[];
+  word_count: number;
+  on_page_targeting: boolean;
+}
+
 /** Aggregate rollup computed at audit completion (audits.insights). */
 export interface AuditInsights {
   situation_distribution: Record<SuggestionSituation, number>;
@@ -170,6 +226,8 @@ export interface Audit {
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
+  citation_analysis: CitationAnalysisEntry[];
+  citation_status: "analyzing" | "done" | null;
 }
 
 export interface PollResult {
@@ -193,6 +251,8 @@ export interface PollResult {
    *  (LLM-extracted, excl. the audited brand). The competitor signal — distinct
    *  from cited source domains. */
   brands_named: string[];
+  why_cited: WhyCited[];
+  own_page: OwnPage | null;
   suggestion: Suggestion | null;
   created_at: string;
 }
