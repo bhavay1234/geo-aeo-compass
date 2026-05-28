@@ -2,7 +2,11 @@ import { pollChatGPT } from '../llm';
 import { parseCitations } from './citation-parser';
 import { generateQueries, type BuyerQuery } from './query-bank';
 import { competitorToDomain, normalizeDomain } from './source-classifier';
-import { inferPositioning, generateQuerySuggestion } from '../llm/suggestions';
+import {
+  inferPositioning,
+  generateQuerySuggestion,
+  inferBrandVerdict,
+} from '../llm/suggestions';
 import { getSupabaseAdmin, type Env } from '../db/supabase';
 import type {
   AuditSummary,
@@ -19,7 +23,14 @@ import type {
   DiscoveredLabel,
   Confidence,
   DiscoveredInQuery,
+  BrandVerdict,
 } from '../db/types';
+
+/** Lightweight brand name from a domain (server-safe; no React imports). */
+function cleanNameFromDomain(domain: string): string {
+  const core = normalizeDomain(domain).split('.')[0] || domain;
+  return core ? core.charAt(0).toUpperCase() + core.slice(1) : domain;
+}
 
 const BATCH_SIZE = 3;
 
@@ -696,7 +707,42 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       })
     );
 
-    // 6) Recompute insights/headline with the corrected competitor count and
+    // 6) Brand verdicts — batched "what is X?" mini-calls for the user's brand
+    //    + each profiled competitor (named + discovered). One call each, all
+    //    fired in parallel; failures fall back to ''.
+    const verdictTargets: Array<{ name: string; domain: string | null; isYou: boolean }> = [
+      { name: brandName, domain: brandDomain, isYou: true },
+      ...namedCompetitors.map((n) => ({
+        name: n,
+        domain: competitorToDomain(n),
+        isYou: false,
+      })),
+      ...competitorsList.map((d) => ({
+        name: cleanNameFromDomain(d.domain),
+        domain: d.domain,
+        isYou: false,
+      })),
+    ];
+    const seenV = new Set<string>();
+    const targets = verdictTargets.filter((t) => {
+      const k = t.name.toLowerCase();
+      if (!t.name || seenV.has(k)) return false;
+      seenV.add(k);
+      return true;
+    });
+    const verdictResults = await Promise.allSettled(
+      targets.map((t) => inferBrandVerdict(t.name, t.domain, env))
+    );
+    let brandVerdict = '';
+    const competitorVerdicts: BrandVerdict[] = [];
+    targets.forEach((t, i) => {
+      const r = verdictResults[i];
+      const v = r.status === 'fulfilled' ? r.value : '';
+      if (t.isYou) brandVerdict = v;
+      else competitorVerdicts.push({ name: t.name, domain: t.domain, verdict: v });
+    });
+
+    // 7) Recompute insights/headline with the corrected competitor count and
     //    write positioning (non-null marks enrichment complete for the UI).
     const insights = await computeInsights(auditId, env);
     insights.discovered_competitor_count = competitorsList.length;
@@ -710,6 +756,8 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
         insights,
         discovered_competitors: discovered,
         positioning: positioning ?? '',
+        brand_verdict: brandVerdict,
+        competitor_verdicts: competitorVerdicts,
       })
       .eq('id', auditId);
 

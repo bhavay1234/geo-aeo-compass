@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SummaryRouteImport } from './routes/summary'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as QueriesRouteImport } from './routes/queries'
 import { Route as CompetitorsRouteImport } from './routes/competitors'
@@ -17,6 +18,11 @@ import { Route as ActionsRouteImport } from './routes/actions'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuditIdRouteImport } from './routes/audit.$id'
 
+const SummaryRoute = SummaryRouteImport.update({
+  id: '/summary',
+  path: '/summary',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -60,6 +66,7 @@ export interface FileRoutesByFullPath {
   '/competitors': typeof CompetitorsRoute
   '/queries': typeof QueriesRoute
   '/settings': typeof SettingsRoute
+  '/summary': typeof SummaryRoute
   '/audit/$id': typeof AuditIdRoute
 }
 export interface FileRoutesByTo {
@@ -69,6 +76,7 @@ export interface FileRoutesByTo {
   '/competitors': typeof CompetitorsRoute
   '/queries': typeof QueriesRoute
   '/settings': typeof SettingsRoute
+  '/summary': typeof SummaryRoute
   '/audit/$id': typeof AuditIdRoute
 }
 export interface FileRoutesById {
@@ -79,6 +87,7 @@ export interface FileRoutesById {
   '/competitors': typeof CompetitorsRoute
   '/queries': typeof QueriesRoute
   '/settings': typeof SettingsRoute
+  '/summary': typeof SummaryRoute
   '/audit/$id': typeof AuditIdRoute
 }
 export interface FileRouteTypes {
@@ -90,6 +99,7 @@ export interface FileRouteTypes {
     | '/competitors'
     | '/queries'
     | '/settings'
+    | '/summary'
     | '/audit/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -99,6 +109,7 @@ export interface FileRouteTypes {
     | '/competitors'
     | '/queries'
     | '/settings'
+    | '/summary'
     | '/audit/$id'
   id:
     | '__root__'
@@ -108,6 +119,7 @@ export interface FileRouteTypes {
     | '/competitors'
     | '/queries'
     | '/settings'
+    | '/summary'
     | '/audit/$id'
   fileRoutesById: FileRoutesById
 }
@@ -118,11 +130,19 @@ export interface RootRouteChildren {
   CompetitorsRoute: typeof CompetitorsRoute
   QueriesRoute: typeof QueriesRoute
   SettingsRoute: typeof SettingsRoute
+  SummaryRoute: typeof SummaryRoute
   AuditIdRoute: typeof AuditIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/summary': {
+      id: '/summary'
+      path: '/summary'
+      fullPath: '/summary'
+      preLoaderRoute: typeof SummaryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -182,6 +202,7 @@ const rootRouteChildren: RootRouteChildren = {
   CompetitorsRoute: CompetitorsRoute,
   QueriesRoute: QueriesRoute,
   SettingsRoute: SettingsRoute,
+  SummaryRoute: SummaryRoute,
   AuditIdRoute: AuditIdRoute,
 }
 export const routeTree = rootRouteImport

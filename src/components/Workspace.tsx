@@ -1,42 +1,25 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getRecentAudits, getAuditResult } from "@/lib/client/api";
-import type { Audit, PollResult } from "@/lib/db/types";
-import { DashboardShell } from "./DashboardShell";
-import { AuditSelector } from "./AuditSelector";
+import {
+  WorkspaceContext,
+  type WorkspaceValue,
+} from "./terminal/workspace-context";
+import { StatusBar, TabNav } from "./terminal/Shell";
 
-interface WorkspaceValue {
-  audits: Audit[];
-  selectedId: string | null;
-  audit: Audit | null;
-  polls: PollResult[];
-  loading: boolean;
-  hasAnyCompleted: boolean;
-}
+export { useWorkspace } from "./terminal/workspace-context";
 
-const WorkspaceContext = createContext<WorkspaceValue | null>(null);
-
-export function useWorkspace(): WorkspaceValue {
-  const v = useContext(WorkspaceContext);
-  if (!v) throw new Error("useWorkspace must be used within <Workspace>");
-  return v;
-}
+const PENDING = new Set(["pending", "running", "finalizing"]);
 
 /**
- * Shared shell for the audit "workspace" pages (queries, competitors,
- * actions, analytics, settings). Owns the global audit selector and fetches
- * the selected audit's full result ONCE — child pages read it via
- * useWorkspace(). Selected audit_id lives in the URL as ?audit=<id> so the
- * view is shareable/refreshable. Default = most recent completed audit.
+ * Terminal shell + shared audit data for all workspace tabs. Owns the global
+ * audit selector (status bar) and fetches the selected audit ONCE; tabs read
+ * it via useWorkspace(). Selected audit_id lives in the URL as ?audit=<id>.
+ * The result query polls while the audit is still running/finalizing and while
+ * enrichment (positioning) lands, so loading + live tier upgrades work.
  */
-export function Workspace({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
+export function Workspace({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as { audit?: string };
 
@@ -52,24 +35,23 @@ export function Workspace({
     queryKey: ["audit-result", selectedId],
     queryFn: () => getAuditResult(selectedId as string),
     enabled: !!selectedId,
-    // While the selected audit is still enriching (completed but positioning
-    // not yet written), refetch so discovered tiers / suggestions upgrade live.
     refetchInterval: (query) => {
       const a = query.state.data?.audit;
       if (!a) return false;
+      if (PENDING.has(a.status)) return 3000; // run/scoring → keep polling
       if (
         a.status === "completed" &&
         a.positioning == null &&
         a.completed_at != null &&
         Date.now() - new Date(a.completed_at).getTime() < 60_000
       ) {
-        return 4000;
+        return 4000; // enrichment landing → tiers/suggestions upgrade live
       }
       return false;
     },
   });
 
-  const onSelect = (id: string) =>
+  const select = (id: string) =>
     navigate({
       to: ".",
       search: (prev: Record<string, unknown>) => ({ ...prev, audit: id }),
@@ -78,6 +60,7 @@ export function Workspace({
   const value: WorkspaceValue = {
     audits,
     selectedId,
+    select,
     audit: resultQ.data?.audit ?? null,
     polls: resultQ.data?.polls ?? [],
     loading: recentQ.isLoading || (!!selectedId && resultQ.isLoading),
@@ -86,18 +69,11 @@ export function Workspace({
 
   return (
     <WorkspaceContext.Provider value={value}>
-      <DashboardShell
-        title={title}
-        headerRight={
-          <AuditSelector
-            audits={audits}
-            selectedId={selectedId}
-            onSelect={onSelect}
-          />
-        }
-      >
+      <div className="tm">
+        <StatusBar />
+        <TabNav />
         {children}
-      </DashboardShell>
+      </div>
     </WorkspaceContext.Provider>
   );
 }

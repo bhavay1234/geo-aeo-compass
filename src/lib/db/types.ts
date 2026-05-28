@@ -116,6 +116,13 @@ export interface CitationRole {
   role: 'competitor' | 'source' | 'unsure';
 }
 
+/** "How ChatGPT describes [brand]" — one-line verdict from a 'what is X?' poll. */
+export interface BrandVerdict {
+  name: string;
+  domain: string | null;
+  verdict: string;
+}
+
 /** Aggregate rollup computed at audit completion (audits.insights). */
 export interface AuditInsights {
   situation_distribution: Record<SuggestionSituation, number>;
@@ -157,6 +164,8 @@ export interface Audit {
   insights: AuditInsights | null;
   discovered_competitors: DiscoveredCompetitor[];
   positioning: string | null;
+  brand_verdict: string | null;
+  competitor_verdicts: BrandVerdict[];
   notes: string | null;
   error_message: string | null;
   created_at: string;

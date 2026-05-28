@@ -90,6 +90,45 @@ export async function inferPositioning(
   }
 }
 
+const VERDICT_SYSTEM =
+  "You answer 'what is [company]?' in ONE concise sentence: what it does and " +
+  "who it's for — how you would categorize it. No preamble, no markdown, no " +
+  'quotes. If you genuinely do not recognize it, reply exactly: Not well known.';
+
+/**
+ * "How ChatGPT describes [brand]" — one gpt-4o-mini 'what is X?' poll per
+ * brand, batched in finalize. Returns '' on any failure.
+ */
+export async function inferBrandVerdict(
+  name: string,
+  domain: string | null,
+  env: Env
+): Promise<string> {
+  if (!env.OPENAI_API_KEY || !name.trim()) return '';
+  try {
+    const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+    const completion = await withTimeout(
+      openai.chat.completions.create({
+        model: MODEL,
+        temperature: 0.2,
+        max_tokens: 90,
+        messages: [
+          { role: 'system', content: VERDICT_SYSTEM },
+          {
+            role: 'user',
+            content: `What is ${name}${domain ? ` (${domain})` : ''}?`,
+          },
+        ],
+      }),
+      TIMEOUT_MS
+    );
+    return (completion.choices[0]?.message?.content || '').trim();
+  } catch (err: any) {
+    console.error('[verdict] failed:', err?.message);
+    return '';
+  }
+}
+
 const SUGGESTION_SYSTEM =
   'You are an Answer-Engine-Optimization strategist. ChatGPT was asked a buyer ' +
   'query and produced an answer with web citations. Given the brand, its inferred ' +

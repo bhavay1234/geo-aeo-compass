@@ -1,21 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Workspace, useWorkspace } from "@/components/Workspace";
-import { EmptyState } from "@/components/EmptyState";
-import { Settings as SettingsIcon } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
-  head: () => ({
-    meta: [
-      { title: "Settings — AEO/GEO Tracker" },
-      { name: "description", content: "Audit configuration and tracking scope." },
-    ],
-  }),
+  head: () => ({ meta: [{ title: "Settings — Compass" }] }),
   component: SettingsPage,
 });
 
 function SettingsPage() {
   return (
-    <Workspace title="Settings">
+    <Workspace>
       <SettingsInner />
     </Workspace>
   );
@@ -23,74 +16,78 @@ function SettingsPage() {
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between px-5 py-3">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium text-card-foreground">{value}</span>
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 16,
+        padding: "11px 18px",
+        borderBottom: "1px solid var(--grid)",
+      }}
+    >
+      <span style={{ fontSize: 12, color: "var(--ink-3)" }}>{label}</span>
+      <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", textAlign: "right" }}>
+        {value}
+      </span>
     </div>
   );
 }
 
 function SettingsInner() {
-  const { audit, loading } = useWorkspace();
+  const { audit, loading, hasAnyCompleted } = useWorkspace();
 
-  if (loading) {
-    return (
-      <p className="py-12 text-center text-sm text-muted-foreground">Loading…</p>
-    );
-  }
-
+  if (loading && !audit) return <div className="tm-empty mono">Loading…</div>;
   if (!audit) {
-    return (
-      <EmptyState
-        icon={SettingsIcon}
-        title="No completed audits yet"
-        description="Run an audit to see its configuration here."
-        ctaLabel="Run an audit"
-        ctaTo="/"
-      />
-    );
+    if (!hasAnyCompleted)
+      return (
+        <div className="tm-empty">
+          <p style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>
+            No audit selected
+          </p>
+          <p style={{ marginTop: 6 }}>Run an audit to see its configuration.</p>
+          <Link to="/" className="tm-btn" style={{ marginTop: 16 }}>
+            Run an audit
+          </Link>
+        </div>
+      );
+    return <div className="tm-empty mono">Loading…</div>;
   }
 
   const competitors = audit.competitors ?? [];
+  const discovered = (audit.discovered_competitors ?? []).filter(
+    (d) => d.label === "competitor"
+  ).length;
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight text-card-foreground">
-          Settings
-        </h2>
-        <p className="text-sm text-muted-foreground">
-          Configuration for the selected audit
-        </p>
+    <div className="tm-rows" style={{ maxWidth: 640 }}>
+      <div className="tm-panel tm-reveal" style={{ borderRight: "none" }}>
+        <div className="tm-phead">
+          <h2>◧ Brand</h2>
+          <span className="meta">audited target</span>
+        </div>
+        <Row label="Brand name" value={audit.brand_name} />
+        <Row label="Domain" value={audit.domain} />
+        <Row
+          label="Named competitors"
+          value={competitors.length ? competitors.join(", ") : "None"}
+        />
+        <Row label="Discovered competitors" value={`${discovered}`} />
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
-        <div className="border-b border-border px-5 py-3">
-          <h3 className="font-semibold text-card-foreground">Brand</h3>
+      <div className="tm-panel tm-reveal" style={{ borderRight: "none", animationDelay: ".05s" }}>
+        <div className="tm-phead">
+          <h2>◫ Tracking scope</h2>
+          <span className="meta">this run</span>
         </div>
-        <div className="divide-y divide-border">
-          <Row label="Brand name" value={audit.brand_name} />
-          <Row label="Domain" value={audit.domain} />
-          <Row
-            label="Named competitors"
-            value={competitors.length ? competitors.join(", ") : "None"}
-          />
-        </div>
+        <Row label="Answer engine" value="ChatGPT · gpt-4o-search-preview" />
+        <Row label="Queries in audit" value={`${audit.progress_total}`} />
+        <Row label="Status" value={audit.status} />
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
-        <div className="border-b border-border px-5 py-3">
-          <h3 className="font-semibold text-card-foreground">Tracking scope</h3>
-        </div>
-        <div className="divide-y divide-border">
-          <Row label="Answer engine" value="ChatGPT (gpt-4o-search-preview)" />
-          <Row label="Queries in this audit" value={`${audit.progress_total}`} />
-        </div>
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        v1 tracks ChatGPT only. Additional answer engines arrive in later
-        releases.
+      <p style={{ padding: "14px 18px", fontSize: 11, color: "var(--ink-3)" }}>
+        Compass tracks ChatGPT only. Configuration is fixed per run — start a new
+        audit from the launcher to change brand, competitors, or queries.
       </p>
     </div>
   );

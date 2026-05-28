@@ -1,303 +1,195 @@
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Workspace, useWorkspace } from "@/components/Workspace";
-import { EmptyState } from "@/components/EmptyState";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { deriveBrandName } from "@/components/CitedBrands";
+import { Workspace } from "@/components/Workspace";
+import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
+import { Meter } from "@/components/terminal/primitives";
+import { queryState, whoCited, type QueryState } from "@/components/terminal/derive";
+import { normalizeDomain } from "@/lib/audit/source-classifier";
 import { updateNotes } from "@/lib/client/api";
-import type {
-  PollResult,
-  Suggestion,
-  SuggestionSituation,
-} from "@/lib/db/types";
-import { Zap, AlertTriangle, Loader2, Check } from "lucide-react";
+import type { Audit, PollResult, Suggestion } from "@/lib/db/types";
 
 export const Route = createFileRoute("/actions")({
-  head: () => ({
-    meta: [
-      { title: "Actions — AEO/GEO Tracker" },
-      {
-        name: "description",
-        content: "Prioritized recommendations from the selected audit.",
-      },
-    ],
-  }),
+  head: () => ({ meta: [{ title: "Actionables — Compass" }] }),
   component: ActionsPage,
 });
 
-type PollWithSuggestion = PollResult & { suggestion: Suggestion };
-
-const SITUATION_ORDER: SuggestionSituation[] = [
-  "losing_to_competitor",
-  "weak_position",
-  "open_opportunity",
-  "authority_gap",
-  "winning",
-];
-
-const SITUATION_LABELS: Record<SuggestionSituation, string> = {
-  losing_to_competitor: "Losing to competitors",
-  weak_position: "Weak position",
-  open_opportunity: "Open opportunities",
-  authority_gap: "Authority gaps",
-  winning: "Winning",
-};
-
-const SEVERITY_RANK: Record<Suggestion["severity"], number> = {
-  high: 0,
-  medium: 1,
-  low: 2,
-};
-
-const SEVERITY_STYLES: Record<Suggestion["severity"], string> = {
-  high: "border-destructive/30 bg-destructive/10 text-destructive",
-  medium: "border-warning/30 bg-warning/10 text-warning",
-  low: "border-muted-foreground/30 bg-muted text-muted-foreground",
-};
-
-function cleanList(domains: string[], n = 3): string {
-  const seen = new Set<string>();
-  const names: string[] = [];
-  for (const d of domains) {
-    const name = deriveBrandName("", d);
-    const key = name.toLowerCase();
-    if (!name || seen.has(key)) continue;
-    seen.add(key);
-    names.push(name);
-    if (names.length >= n) break;
-  }
-  return names.join(", ");
-}
-
-/**
- * Per-query evidence line, derived ONLY from already-fetched poll_results.
- * Differentiates otherwise-identical suggestions by their real citation
- * signal. Returns null when a cited query has nothing extra to add.
- */
-function querySignal(poll: PollResult): string | null {
-  const discovered = (poll.discovered_in_query ?? []).filter(
-    (d) => d.label === "competitor"
-  );
-  if (discovered.length > 0) {
-    return `Players winning this: ${cleanList(discovered.map((d) => d.domain))}`;
-  }
-  if (poll.brand_cited) return null;
-
-  const cites = poll.citations ?? [];
-  const reviewAnalyst = cites.filter(
-    (c) => c.source_type === "review_directory" || c.source_type === "analyst"
-  );
-  if (reviewAnalyst.length > 0) {
-    return `Sourced from ${cleanList(reviewAnalyst.map((c) => c.domain))} — review/analyst pages you're absent from.`;
-  }
-  const external = cites.filter((c) => c.source_type !== "own").map((c) => c.domain);
-  if (external.length > 0) {
-    return `Cited sources: ${cleanList(external)} — no category page owns this yet.`;
-  }
-  return "Answered from model training — no live sources; authority-content play, slower.";
-}
-
-interface Cluster {
-  action: string;
-  members: PollWithSuggestion[];
-  topSeverity: number;
-}
-
 function ActionsPage() {
   return (
-    <Workspace title="Actions">
-      <ActionsInner />
+    <Workspace>
+      <AuditGate>
+        {({ audit, polls, partial }) => (
+          <>
+            {partial && <PartialBanner />}
+            <ActionsView audit={audit} polls={polls} />
+          </>
+        )}
+      </AuditGate>
     </Workspace>
   );
 }
 
-function ActionsInner() {
-  const { audit, polls, loading } = useWorkspace();
+type Status = "todo" | "doing" | "done";
+const STATE_STRIPE: Record<QueryState, string> = {
+  absent: "var(--hot)",
+  weak: "var(--warn)",
+  held: "var(--pos)",
+};
+const STATE_LABEL: Record<QueryState, string> = {
+  absent: "Invisible",
+  weak: "Weak",
+  held: "Held",
+};
 
-  if (loading) {
-    return (
-      <p className="py-12 text-center text-sm text-muted-foreground">Loading…</p>
-    );
-  }
+interface Action {
+  id: string;
+  query: string;
+  state: QueryState;
+  title: string;
+  who: string[];
+  sources: number;
+  impact: number;
+  effort: number;
+  severity: Suggestion["severity"];
+}
 
-  if (!audit) {
-    return (
-      <EmptyState
-        icon={Zap}
-        title="No completed audits yet"
-        description="Run an audit to get a prioritized list of recommended actions."
-        ctaLabel="Run an audit"
-        ctaTo="/"
-      />
-    );
-  }
+function ActionsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
+  const ownNorm = normalizeDomain(audit.domain);
 
-  const highSeverity = audit.insights?.high_severity_count ?? 0;
-  const withSuggestion = polls.filter(
-    (p): p is PollWithSuggestion => p.suggestion !== null
-  );
-  const actionable = withSuggestion.filter(
-    (p) => p.suggestion.situation !== "winning"
-  ).length;
+  const actions: Action[] = polls
+    .filter((p) => p.suggestion && p.suggestion.situation !== "winning")
+    .map((p) => {
+      const state = queryState(p);
+      const who = whoCited(p, ownNorm);
+      const impact = state === "absent" ? 3 + Math.min(2, who.length) : 2;
+      const effort = state === "absent" ? 4 : 2; // building new surface vs strengthening
+      return {
+        id: p.id,
+        query: p.query_text,
+        state,
+        title: p.suggestion!.action,
+        who,
+        sources: (p.citations ?? []).length,
+        impact: Math.min(5, impact),
+        effort,
+        severity: p.suggestion!.severity,
+      };
+    })
+    .sort((a, b) => b.impact * (6 - b.effort) - a.impact * (6 - a.effort));
 
-  // Group by situation, then cluster by identical action text within a group.
-  const groups = SITUATION_ORDER.map((situation) => {
-    const items = withSuggestion.filter(
-      (p) => p.suggestion.situation === situation
-    );
-    if (items.length === 0) return null;
-
-    const clusterMap = new Map<string, PollWithSuggestion[]>();
-    for (const p of items) {
-      const key = p.suggestion.action;
-      const arr = clusterMap.get(key);
-      if (arr) arr.push(p);
-      else clusterMap.set(key, [p]);
-    }
-
-    const clusters: Cluster[] = Array.from(clusterMap.entries()).map(
-      ([action, members]) => ({
-        action,
-        members: members
-          .slice()
-          .sort(
-            (a, b) =>
-              SEVERITY_RANK[a.suggestion.severity] -
-              SEVERITY_RANK[b.suggestion.severity]
-          ),
-        topSeverity: Math.min(
-          ...members.map((m) => SEVERITY_RANK[m.suggestion.severity])
-        ),
-      })
-    );
-    clusters.sort((a, b) => a.topSeverity - b.topSeverity);
-
-    return { situation, clusters, count: items.length };
-  }).filter((g): g is NonNullable<typeof g> => g !== null);
+  const high = actions.filter((a) => a.severity === "high").length;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight text-card-foreground">
-          {audit.brand_name}
-        </h2>
-        <p className="text-sm text-muted-foreground">{audit.domain} · ChatGPT</p>
-      </div>
-
-      {audit.positioning && (
-        <div className="rounded-xl border border-border bg-card p-5">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Inferred positioning
-          </p>
-          <p className="mt-1 text-sm text-card-foreground">{audit.positioning}</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Inferred from your queries and ChatGPT's answers — a best-guess, not
-            a verified description.
-          </p>
-        </div>
-      )}
-
-      {/* Top strip */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
-            <AlertTriangle className="h-5 w-5 text-destructive" />
-          </div>
-          <div>
-            <p className="text-2xl font-bold tracking-tight text-card-foreground">
-              {highSeverity}
-            </p>
-            <p className="text-xs text-muted-foreground">high-severity issues</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-xl border border-border bg-card p-5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-            <Zap className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <p className="text-2xl font-bold tracking-tight text-card-foreground">
-              {actionable}
-            </p>
-            <p className="text-xs text-muted-foreground">actionable queries</p>
-          </div>
-        </div>
+    <div>
+      <div className="tm-toolbar">
+        <span className="tm-sort mono" style={{ paddingLeft: 16 }}>
+          {actions.length} actions · {high} high-priority · sorted by impact ×
+          ease
+        </span>
       </div>
 
       <NotesEditor auditId={audit.id} initialNotes={audit.notes ?? ""} />
 
-      {groups.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border bg-card px-4 py-8 text-center text-sm text-muted-foreground">
-          No recommendations generated for this audit.
-        </p>
-      ) : (
-        groups.map((g) => (
-          <section key={g.situation}>
-            <div className="mb-3 flex items-center gap-2">
-              <h3 className="text-lg font-semibold text-card-foreground">
-                {SITUATION_LABELS[g.situation]}
-              </h3>
-              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                {g.count}
-              </span>
-            </div>
-            <div className="space-y-3">
-              {g.clusters.map((cluster, ci) => (
-                <ClusterCard key={ci} cluster={cluster} />
-              ))}
-            </div>
-          </section>
-        ))
-      )}
+      <div className="tm-rows">
+        {actions.length === 0 ? (
+          <div className="tm-empty">
+            No actionable gaps — you're cited across these queries.
+          </div>
+        ) : (
+          actions.map((a, i) => (
+            <ActionRow key={a.id} a={a} rank={i + 1} />
+          ))
+        )}
+      </div>
     </div>
   );
 }
 
-function ClusterCard({ cluster }: { cluster: Cluster }) {
-  const merged = cluster.members.length > 1;
-
+function ActionRow({ a, rank }: { a: Action; rank: number }) {
+  const [status, setStatus] = useState<Status>("todo");
+  const STATUS_LABEL: Record<Status, string> = {
+    todo: "To do",
+    doing: "In progress",
+    done: "Done",
+  };
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-start justify-between gap-3">
-        <p className="text-sm text-card-foreground">{cluster.action}</p>
-        {merged ? (
-          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-            {cluster.members.length} queries
-          </span>
-        ) : (
-          <Badge
-            variant="outline"
-            className={SEVERITY_STYLES[cluster.members[0].suggestion.severity]}
-          >
-            {cluster.members[0].suggestion.severity}
-          </Badge>
-        )}
-      </div>
-
-      <div className="mt-3 divide-y divide-border border-t border-border">
-        {cluster.members.map((p) => {
-          const signal = merged ? querySignal(p) : null;
-          return (
-            <div key={p.id} className="py-2.5 first:pt-3">
-              <div className="flex items-start justify-between gap-3">
-                <span className="text-sm font-medium text-card-foreground">
-                  {p.query_text}
-                </span>
-                <Badge
-                  variant="outline"
-                  className={SEVERITY_STYLES[p.suggestion.severity]}
+    <div
+      className="tm-card tm-reveal"
+      style={{
+        animationDelay: `${Math.min(rank, 8) * 0.03}s`,
+        position: "relative",
+        opacity: status === "done" ? 0.6 : 1,
+      }}
+    >
+      <span
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: 3,
+          background: STATE_STRIPE[a.state],
+        }}
+      />
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+        <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)", paddingTop: 2 }}>
+          {String(rank).padStart(2, "0")}
+        </span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, color: "var(--ink)" }}>
+            {a.title}
+          </div>
+          <div className="mono" style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4 }}>
+            {STATE_LABEL[a.state]} · {a.who.length} competitor
+            {a.who.length === 1 ? "" : "s"} cited · {a.sources} sources in answer
+          </div>
+          {(a.who.length > 0 || true) && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+              <span className="tm-chip" title="query this fixes">
+                {a.query}
+              </span>
+              {a.who.slice(0, 3).map((w, i) => (
+                <span
+                  key={i}
+                  className="tm-chip"
+                  style={{ background: "var(--neg-bg)", color: "var(--neg)" }}
                 >
-                  {p.suggestion.severity}
-                </Badge>
-              </div>
-              {signal && (
-                <p className="mt-1 text-xs text-muted-foreground">{signal}</p>
-              )}
+                  {w}
+                </span>
+              ))}
             </div>
-          );
-        })}
+          )}
+          <div style={{ display: "flex", gap: 18, marginTop: 12, alignItems: "center" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span className="tm-label" style={{ margin: 0 }}>
+                Impact
+              </span>
+              <Meter value={a.impact} />
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span className="tm-label" style={{ margin: 0 }}>
+                Effort
+              </span>
+              <Meter value={a.effort} />
+            </span>
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {(["todo", "doing", "done"] as Status[]).map((s) => (
+            <button
+              key={s}
+              onClick={() => setStatus(s)}
+              className="tm-chip"
+              style={
+                status === s
+                  ? { background: "var(--ink)", color: "var(--bg)", cursor: "pointer" }
+                  : { cursor: "pointer" }
+              }
+            >
+              {STATUS_LABEL[s]}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -328,47 +220,28 @@ function NotesEditor({
   });
 
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <h3 className="text-lg font-semibold text-card-foreground">
-        Strategic notes
-      </h3>
-      <p className="mb-3 text-sm text-muted-foreground">
-        Your close after reviewing the findings. Saved to this audit.
-      </p>
-      <Textarea
+    <div className="tm-card">
+      <div className="tm-label">Strategic notes</div>
+      <textarea
+        className="tm-input nar"
+        style={{ minHeight: 80 }}
         value={notes}
         onChange={(e) => {
           setNotes(e.target.value);
           setSaved(false);
         }}
-        placeholder="e.g. Priority: get listed on G2 and target the three comparison queries we're losing…"
-        className="min-h-[120px]"
+        placeholder="Your close after reviewing the gaps — saved to this audit."
       />
-      <div className="mt-3 flex items-center gap-3">
-        <Button
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
+        <button
+          className="tm-btn"
           onClick={() => mutation.mutate()}
           disabled={mutation.isPending}
-          className="bg-primary text-primary-foreground hover:bg-primary/90"
         >
-          {mutation.isPending ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Saving…
-            </>
-          ) : (
-            "Save notes"
-          )}
-        </Button>
+          {mutation.isPending ? "Saving…" : "Save notes"}
+        </button>
         {saved && !mutation.isPending && (
-          <span className="flex items-center gap-1 text-sm text-success">
-            <Check className="h-4 w-4" />
-            Saved
-          </span>
-        )}
-        {mutation.isError && (
-          <span className="text-sm text-destructive">
-            {(mutation.error as Error).message}
-          </span>
+          <span style={{ fontSize: 12, color: "var(--pos)" }}>Saved</span>
         )}
       </div>
     </div>
