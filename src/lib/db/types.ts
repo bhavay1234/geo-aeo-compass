@@ -90,12 +90,19 @@ export interface DiscoveredCompetitor {
   sample_url: string;
 }
 
-/** Per-query subset of discovered competitors that appeared in one answer. */
+/**
+ * Per-query view of every EXTERNAL domain cited in one answer (excludes own
+ * brand + named competitors). url/title/source_type come from the stored
+ * citation; label/confidence are present only when the domain also recurs at
+ * audit level (from the single gpt-4o-mini classification), null otherwise.
+ */
 export interface DiscoveredInQuery {
   domain: string;
-  label: DiscoveredLabel;
-  confidence: Confidence;
+  url: string;
+  title: string;
   source_type: SourceType;
+  label: DiscoveredLabel | null;
+  confidence: Confidence | null;
 }
 
 /** Aggregate rollup computed at audit completion (audits.insights). */

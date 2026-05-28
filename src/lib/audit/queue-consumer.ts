@@ -216,22 +216,15 @@ export async function processQueueBatch(
       })
       .eq('id', auditId);
 
-    // Parts B & C — pure reuse of the audit-level classification above
-    // (ZERO new LLM calls): backfill per-query discovered competitors and
-    // enrich suggestions for rows where a discovered competitor appeared.
-    const rowsUpdated = await attachDiscoveredToQueries(
+    // Per-query discovered domains — pure data re-derivation from stored
+    // citations (ZERO new LLM calls). Lists ALL external domains per query;
+    // labels reused from the single audit-level classification above.
+    await attachDiscoveredToQueries(
       auditId,
       discoveredCompetitors,
+      audit.domain,
+      competitors,
       env
-    );
-    console.log(
-      '[discovered-per-query]',
-      'backfilled',
-      rowsUpdated,
-      'rows;',
-      insights.discovered_competitor_count,
-      'competitors labeled for audit',
-      auditId
     );
 
     console.log(

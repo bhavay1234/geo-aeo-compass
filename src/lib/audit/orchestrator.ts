@@ -487,23 +487,41 @@ type DiscoveredAttachRow = {
 };
 
 /**
- * Reuses the audit-level discovered_competitors classification (no new LLM
- * calls) to backfill each poll_result with the discovered domains that
- * appeared in THAT query, and to append a short clause to suggestions where
- * a discovered competitor showed up. Pure map lookup. Returns rows updated.
+ * Builds poll_results.discovered_in_query for every row in this audit:
+ * ALL external domains cited in that query (excluding own brand + named
+ * competitors), each with url + title + source_type from the stored
+ * citation. label/confidence are attached ONLY for domains that also recur
+ * at audit level (reusing the single gpt-4o-mini classification's output) —
+ * non-recurring domains carry null label, no extra calls.
+ *
+ * Also appends a suggestion clause naming competitor-LABELED discovered
+ * domains (audit-level), gated so unlabeled domains don't flood it.
+ *
+ * Pure data re-derivation — ZERO LLM/API calls. Returns rows updated.
  */
 export async function attachDiscoveredToQueries(
   auditId: string,
   discovered: DiscoveredCompetitor[],
+  brandDomain: string,
+  competitors: string[],
   env: Env
 ): Promise<number> {
   const supabase = getSupabaseAdmin(env);
 
-  const lookup = new Map<string, { label: DiscoveredCompetitor['label']; confidence: DiscoveredCompetitor['confidence'] }>();
+  // Label/confidence map from the audit-level (recurring) discovered list.
+  const lookup = new Map<
+    string,
+    { label: DiscoveredCompetitor['label']; confidence: DiscoveredCompetitor['confidence'] }
+  >();
   for (const d of discovered) {
     lookup.set(d.domain, { label: d.label, confidence: d.confidence });
   }
-  if (lookup.size === 0) return 0;
+
+  // "Expected" sources to exclude: own brand + named competitors.
+  const brandNorm = normalizeDomain(brandDomain);
+  const competitorDomainSet = new Set(
+    competitors.map((c) => normalizeDomain(competitorToDomain(c))).filter(Boolean)
+  );
 
   const { data: polls } = await supabase
     .from('poll_results')
@@ -512,38 +530,53 @@ export async function attachDiscoveredToQueries(
 
   const rows = (polls as DiscoveredAttachRow[]) || [];
   let rowsUpdated = 0;
+  let totalExternal = 0;
 
   for (const row of rows) {
-    const seen = new Set<string>();
-    const discoveredInQuery: DiscoveredInQuery[] = [];
+    const byDomain = new Map<string, DiscoveredInQuery>();
     for (const c of row.citations || []) {
+      const d = normalizeDomain(c.domain);
+      if (brandNorm && (d === brandNorm || d.endsWith('.' + brandNorm))) continue;
+      if (competitorDomainSet.has(d)) continue;
+
       const hit = lookup.get(c.domain);
-      if (hit && !seen.has(c.domain)) {
-        seen.add(c.domain);
-        discoveredInQuery.push({
-          domain: c.domain,
-          label: hit.label,
-          confidence: hit.confidence,
-          source_type: c.source_type,
-        });
+      const entry: DiscoveredInQuery = {
+        domain: c.domain,
+        url: c.url,
+        title: c.title,
+        source_type: c.source_type,
+        label: hit?.label ?? null,
+        confidence: hit?.confidence ?? null,
+      };
+
+      // Dedupe by domain; prefer the labeled entry if one exists.
+      const existing = byDomain.get(c.domain);
+      if (!existing || (!existing.label && entry.label)) {
+        byDomain.set(c.domain, entry);
       }
     }
 
-    if (discoveredInQuery.length === 0) continue;
+    const discoveredInQuery = Array.from(byDomain.values());
+    totalExternal += discoveredInQuery.length;
 
-    // Part C: append a clause naming competitor-labeled discovered players.
-    let suggestion = row.suggestion;
+    // Suggestion clause: only competitor-LABELED domains (audit-level), so we
+    // don't flood the suggestion with every unlabeled external domain.
+    const updatePayload: {
+      discovered_in_query: DiscoveredInQuery[];
+      suggestion?: Suggestion;
+    } = { discovered_in_query: discoveredInQuery };
+
     const competitorDomains = discoveredInQuery
       .filter((d) => d.label === 'competitor')
       .map((d) => d.domain);
     if (
-      suggestion &&
+      row.suggestion &&
       competitorDomains.length > 0 &&
-      !suggestion.action.includes(DISCOVERED_CLAUSE_MARKER)
+      !row.suggestion.action.includes(DISCOVERED_CLAUSE_MARKER)
     ) {
-      suggestion = {
-        ...suggestion,
-        action: `${suggestion.action} ${DISCOVERED_CLAUSE_MARKER} ${competitorDomains.join(
+      updatePayload.suggestion = {
+        ...row.suggestion,
+        action: `${row.suggestion.action} ${DISCOVERED_CLAUSE_MARKER} ${competitorDomains.join(
           ', '
         )} — competitors you didn't name.`,
       };
@@ -551,10 +584,18 @@ export async function attachDiscoveredToQueries(
 
     await supabase
       .from('poll_results')
-      .update({ discovered_in_query: discoveredInQuery, suggestion })
+      .update(updatePayload)
       .eq('id', row.id);
     rowsUpdated++;
   }
+
+  const avgCount = rows.length > 0 ? totalExternal / rows.length : 0;
+  console.log(
+    '[discovered-per-query]',
+    auditId,
+    '— avg external domains/query:',
+    avgCount.toFixed(2)
+  );
 
   return rowsUpdated;
 }
