@@ -106,7 +106,7 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
             key={g.id}
             to="/queries"
             search={(prev) => ({ ...prev })}
-            className={`tm-gap ${g.state === "absent" ? "invisible" : g.state}`}
+            className={`tm-gap ${g.state}`}
           >
             <span className="tm-rank">{String(i + 1).padStart(2, "0")}</span>
             <div className="tm-q">
