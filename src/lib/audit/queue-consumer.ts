@@ -3,13 +3,7 @@ import { parseCitations } from './citation-parser';
 import { classifySource, competitorToDomain } from './source-classifier';
 import { buildSuggestion } from './suggestion-engine';
 import { getSupabaseAdmin } from '../db/supabase';
-import {
-  computeSummary,
-  computeInsights,
-  computeDiscoveredCompetitors,
-  attachDiscoveredToQueries,
-  buildInsightHeadline,
-} from './orchestrator';
+import { finalizeAudit } from './orchestrator';
 import type { Citation, InlineCitation } from '../db/types';
 import type { Env, AuditQueueMessage } from '../db/supabase';
 
@@ -177,58 +171,10 @@ export async function processQueueBatch(
     if (audit.status === 'completed' || audit.status === 'failed') continue;
     if ((audit.progress_done ?? 0) < (audit.progress_total ?? 0)) continue;
 
-    const competitors = (audit.competitors as string[]) || [];
-    const summary = await computeSummary(
-      auditId,
-      audit.brand_name,
-      competitors,
-      env
-    );
-    const insights = await computeInsights(auditId, env);
-
-    // Discovered competitors: one cheap gpt-4o-mini call labeling the top
-    // unnamed domains ChatGPT cited. Feeds the discovered_competitor_count
-    // that the headline leads with when > 0.
-    const discoveredCompetitors = await computeDiscoveredCompetitors(
-      auditId,
-      audit.brand_name,
-      audit.domain,
-      competitors,
-      audit.category,
-      env
-    );
-    insights.discovered_competitor_count = discoveredCompetitors.filter(
-      (d) => d.label === 'competitor'
-    ).length;
-
-    summary.headline = buildInsightHeadline(summary, insights);
-    const visibilityScore = Math.round((summary.visibility_rate ?? 0) * 100);
-
-    await supabase
-      .from('audits')
-      .update({
-        status: 'completed',
-        visibility_score: visibilityScore,
-        summary,
-        insights,
-        discovered_competitors: discoveredCompetitors,
-        completed_at: new Date().toISOString(),
-      })
-      .eq('id', auditId);
-
-    // Per-query discovered domains — pure data re-derivation from stored
-    // citations (ZERO new LLM calls). Lists ALL external domains per query;
-    // labels reused from the single audit-level classification above.
-    await attachDiscoveredToQueries(
-      auditId,
-      discoveredCompetitors,
-      audit.domain,
-      competitors,
-      env
-    );
-
-    console.log(
-      `[queue] audit ${auditId} COMPLETED, score: ${visibilityScore}`
-    );
+    // Finalization makes 1 positioning + N per-query gpt-4o-mini calls,
+    // aggregates the citation judgments into discovered competitors, writes
+    // per-query suggestions/roles/discovered_in_query, and marks the audit
+    // completed. See orchestrator.finalizeAudit.
+    await finalizeAudit(auditId, env);
   }
 }

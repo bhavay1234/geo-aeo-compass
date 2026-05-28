@@ -2,7 +2,11 @@ import { pollChatGPT } from '../llm';
 import { parseCitations } from './citation-parser';
 import { generateQueries, type BuyerQuery } from './query-bank';
 import { competitorToDomain, normalizeDomain } from './source-classifier';
-import { classifyDiscoveredDomains } from '../llm/domain-classifier';
+import {
+  inferPositioning,
+  generateQuerySuggestion,
+  mapWithConcurrency,
+} from '../llm/suggestions';
 import { getSupabaseAdmin, type Env } from '../db/supabase';
 import type {
   AuditSummary,
@@ -10,12 +14,18 @@ import type {
   PollResult,
   CategoryStats,
   Citation,
+  CitationRole,
   Suggestion,
   SuggestionSituation,
+  SourceType,
   CompetitorCitation,
   DiscoveredCompetitor,
+  DiscoveredLabel,
+  Confidence,
   DiscoveredInQuery,
 } from '../db/types';
+
+const SUGGESTION_CONCURRENCY = 5;
 
 const BATCH_SIZE = 3;
 
@@ -352,252 +362,269 @@ export async function computeInsights(
   };
 }
 
-type CitationRow = { query_text: string; citations: Citation[] | null };
+/** Map a rule-based source_type to a discovered-list label for non-competitor domains. */
+function sourceTypeToLabel(st: SourceType): DiscoveredLabel {
+  if (st === 'review_directory' || st === 'analyst') return 'aggregator';
+  if (st === 'editorial') return 'editorial';
+  return 'other';
+}
+
+type FinalizePoll = {
+  id: string;
+  query_text: string;
+  full_response: string | null;
+  citations: Citation[] | null;
+  brand_cited: boolean;
+  brand_position: number | null;
+  suggestion: Suggestion | null;
+};
 
 /**
- * Discovered competitors: unnamed domains ChatGPT repeatedly cites that the
- * user never listed. Aggregates citation domains across all poll_results,
- * excludes own/named-competitor/known-source-type domains, takes the top 8
- * by reach, and runs ONE gpt-4o-mini classification call to label them.
- * Returns [] (no LLM call) if there are no candidates.
+ * Finalize a completed audit. Cost shape per audit:
+ *   - N search-preview polls (already done by the queue consumer, per message)
+ *   - 1 gpt-4o-mini positioning-inference call
+ *   - N gpt-4o-mini per-query suggestion calls (pooled, capped concurrency)
+ *
+ * Each per-query call returns a positioning-anchored action AND a judgment of
+ * every cited domain (competitor|source|unsure). Those judgments are aggregated
+ * with NO extra call to build discovered_competitors and to tier the per-query
+ * pills — the per-query LLM judgment overrides the rule-based source label.
+ *
+ * Caveat: positioning + competitor judgments are page-context inference, not
+ * ground truth (a homepage scrape is the v1.1 Apify upgrade).
  */
-export async function computeDiscoveredCompetitors(
-  auditId: string,
-  brandName: string,
-  brandDomain: string,
-  competitors: string[],
-  category: string | null,
-  env: Env
-): Promise<DiscoveredCompetitor[]> {
+export async function finalizeAudit(auditId: string, env: Env): Promise<void> {
   const supabase = getSupabaseAdmin(env);
 
-  const { data: polls } = await supabase
+  const { data: audit } = await supabase
+    .from('audits')
+    .select('*')
+    .eq('id', auditId)
+    .single();
+  if (!audit) return;
+
+  const brandName: string = audit.brand_name;
+  const brandDomain: string = audit.domain;
+  const namedCompetitors: string[] = Array.isArray(audit.competitors)
+    ? audit.competitors
+    : [];
+
+  const { data: pollData } = await supabase
     .from('poll_results')
-    .select('query_text, citations')
+    .select(
+      'id, query_text, full_response, citations, brand_cited, brand_position, suggestion'
+    )
     .eq('audit_id', auditId);
+  const polls = (pollData as FinalizePoll[]) || [];
 
-  const rows = (polls as CitationRow[]) || [];
+  // 1) Positioning — ONE mini call (inferred; honest caveat in the module).
+  const positioning = await inferPositioning(
+    {
+      brandName,
+      domain: brandDomain,
+      queries: polls.map((p) => p.query_text),
+      excerpts: polls.map((p) => p.full_response || '').filter(Boolean),
+    },
+    env
+  );
 
-  const domainStats = new Map<
+  // 2) Per-query positioning-aware suggestion + citation judgments — N mini
+  //    calls, pooled. Each falls back to the deterministic suggestion on failure.
+  const perQuery = await mapWithConcurrency(
+    polls,
+    SUGGESTION_CONCURRENCY,
+    async (p) => {
+      const citations = (p.citations as Citation[]) || [];
+      const llm = await generateQuerySuggestion(
+        {
+          brandName,
+          domain: brandDomain,
+          positioning,
+          query: p.query_text,
+          fullResponse: p.full_response || '',
+          citations,
+          brandCited: p.brand_cited,
+          brandPosition: p.brand_position,
+        },
+        env
+      );
+      return { poll: p, llm };
+    }
+  );
+
+  // 3) Aggregate citation judgments per normalized domain. Competitor wins.
+  const ownNorm = normalizeDomain(brandDomain);
+  const namedNorm = new Set(
+    namedCompetitors
+      .map((c) => normalizeDomain(competitorToDomain(c)))
+      .filter(Boolean)
+  );
+  const competitorJudgedCount = new Map<string, number>();
+  for (const { llm } of perQuery) {
+    if (!llm) continue;
+    for (const j of llm.judgments) {
+      const d = normalizeDomain(j.domain);
+      if (!d || d === ownNorm || namedNorm.has(d)) continue;
+      if (j.role === 'competitor') {
+        competitorJudgedCount.set(d, (competitorJudgedCount.get(d) || 0) + 1);
+      }
+    }
+  }
+
+  // 4) Aggregate external cited-domain stats across all polls.
+  const stats = new Map<
     string,
     {
       domain: string;
-      source_type: Citation['source_type'];
+      norm: string;
       citation_count: number;
       queries: Set<string>;
       sample_url: string;
-      sample_title: string;
+      source_type: SourceType;
     }
   >();
-
-  for (const row of rows) {
-    for (const c of row.citations || []) {
-      const existing = domainStats.get(c.domain);
-      if (existing) {
-        existing.citation_count++;
-        existing.queries.add(row.query_text);
-        // Capture a non-empty title if we don't have one yet — strong signal.
-        if (!existing.sample_title && c.title) existing.sample_title = c.title;
+  for (const p of polls) {
+    for (const c of (p.citations as Citation[]) || []) {
+      const d = normalizeDomain(c.domain);
+      if (!d) continue;
+      if (ownNorm && (d === ownNorm || d.endsWith('.' + ownNorm))) continue;
+      if (namedNorm.has(d)) continue;
+      const ex = stats.get(d);
+      if (ex) {
+        ex.citation_count++;
+        ex.queries.add(p.query_text);
       } else {
-        domainStats.set(c.domain, {
+        stats.set(d, {
           domain: c.domain,
-          source_type: c.source_type,
+          norm: d,
           citation_count: 1,
-          queries: new Set([row.query_text]),
+          queries: new Set([p.query_text]),
           sample_url: c.url,
-          sample_title: c.title || '',
+          source_type: c.source_type,
         });
       }
     }
   }
 
-  const brandNorm = normalizeDomain(brandDomain);
-  const competitorDomainSet = new Set(
-    competitors.map((c) => normalizeDomain(competitorToDomain(c))).filter(Boolean)
-  );
-  const KNOWN_SOURCE_TYPES = new Set(['review_directory', 'analyst', 'editorial']);
-
-  const candidates = Array.from(domainStats.values()).filter((s) => {
-    const d = normalizeDomain(s.domain);
-    if (brandNorm && (d === brandNorm || d.endsWith('.' + brandNorm))) return false;
-    if (competitorDomainSet.has(d)) return false;
-    if (s.source_type === 'own' || s.source_type === 'competitor') return false;
-    if (KNOWN_SOURCE_TYPES.has(s.source_type)) return false;
-    return true;
-  });
-
-  candidates.sort((a, b) => {
-    const byQueries = b.queries.size - a.queries.size;
-    if (byQueries !== 0) return byQueries;
-    return b.citation_count - a.citation_count;
-  });
-
-  const top = candidates.slice(0, 8);
-
-  if (top.length < 1) {
-    console.log('[discovered] 0 candidates for audit', auditId);
-    return [];
-  }
-
-  // Feed the single call richer signal: page title + up to 2 buyer queries
-  // the domain was cited for. Still ONE gpt-4o-mini call for all top domains.
-  const labels = await classifyDiscoveredDomains(
-    top.map((t) => ({
-      domain: t.domain,
-      sample_url: t.sample_url,
-      sample_title: t.sample_title,
-      example_queries: Array.from(t.queries).slice(0, 2),
-    })),
-    brandName,
-    category,
-    env
+  // 5) Build discovered_competitors from judgments + stats (NO extra call).
+  //    Domain judged 'competitor' in >=1 query → competitor (the per-query LLM
+  //    judgment overrides the rule-based source_type). Others labeled by type.
+  //    Caveat: still page-context inference, not ground truth.
+  const discoveredAll: DiscoveredCompetitor[] = Array.from(stats.values()).map(
+    (s) => {
+      const compCount = competitorJudgedCount.get(s.norm) || 0;
+      const isCompetitor = compCount > 0;
+      const label: DiscoveredLabel = isCompetitor
+        ? 'competitor'
+        : sourceTypeToLabel(s.source_type);
+      const confidence: Confidence = isCompetitor
+        ? compCount >= 2
+          ? 'high'
+          : 'medium'
+        : 'low';
+      return {
+        domain: s.domain,
+        citation_count: s.citation_count,
+        queries_seen_in: s.queries.size,
+        label,
+        confidence,
+        sample_url: s.sample_url,
+      };
+    }
   );
 
-  const discovered: DiscoveredCompetitor[] = top.map((t) => {
-    const labeled = labels[t.domain] ?? { label: 'other', confidence: 'low' };
-    return {
-      domain: t.domain,
-      citation_count: t.citation_count,
-      queries_seen_in: t.queries.size,
-      label: labeled.label,
-      confidence: labeled.confidence,
-      sample_url: t.sample_url,
-    };
-  });
+  // Keep all competitors; cap non-competitor "other sources" for readability.
+  const competitorsList = discoveredAll
+    .filter((d) => d.label === 'competitor')
+    .sort((a, b) => b.queries_seen_in - a.queries_seen_in);
+  const otherList = discoveredAll
+    .filter((d) => d.label !== 'competitor')
+    .sort((a, b) => b.queries_seen_in - a.queries_seen_in)
+    .slice(0, 10);
+  const discovered = [...competitorsList, ...otherList];
 
-  const labeledCompetitors = discovered.filter((d) => d.label === 'competitor').length;
-  console.log(
-    '[discovered]',
-    candidates.length,
-    'candidates,',
-    labeledCompetitors,
-    'labeled competitor for audit',
-    auditId
-  );
-
-  return discovered;
-}
-
-const DISCOVERED_CLAUSE_MARKER = 'Discovered players winning this query:';
-
-type DiscoveredAttachRow = {
-  id: string;
-  citations: Citation[] | null;
-  suggestion: Suggestion | null;
-};
-
-/**
- * Builds poll_results.discovered_in_query for every row in this audit:
- * ALL external domains cited in that query (excluding own brand + named
- * competitors), each with url + title + source_type from the stored
- * citation. label/confidence are attached ONLY for domains that also recur
- * at audit level (reusing the single gpt-4o-mini classification's output) —
- * non-recurring domains carry null label, no extra calls.
- *
- * Also appends a suggestion clause naming competitor-LABELED discovered
- * domains (audit-level), gated so unlabeled domains don't flood it.
- *
- * Pure data re-derivation — ZERO LLM/API calls. Returns rows updated.
- */
-export async function attachDiscoveredToQueries(
-  auditId: string,
-  discovered: DiscoveredCompetitor[],
-  brandDomain: string,
-  competitors: string[],
-  env: Env
-): Promise<number> {
-  const supabase = getSupabaseAdmin(env);
-
-  // Label/confidence map from the audit-level (recurring) discovered list.
-  const lookup = new Map<
+  // 6) Per-domain label lookup for the per-query pills.
+  const labelLookup = new Map<
     string,
-    { label: DiscoveredCompetitor['label']; confidence: DiscoveredCompetitor['confidence'] }
+    { label: DiscoveredLabel; confidence: Confidence }
   >();
   for (const d of discovered) {
-    lookup.set(d.domain, { label: d.label, confidence: d.confidence });
+    labelLookup.set(normalizeDomain(d.domain), {
+      label: d.label,
+      confidence: d.confidence,
+    });
   }
 
-  // "Expected" sources to exclude: own brand + named competitors.
-  const brandNorm = normalizeDomain(brandDomain);
-  const competitorDomainSet = new Set(
-    competitors.map((c) => normalizeDomain(competitorToDomain(c))).filter(Boolean)
-  );
-
-  const { data: polls } = await supabase
-    .from('poll_results')
-    .select('id, citations, suggestion')
-    .eq('audit_id', auditId);
-
-  const rows = (polls as DiscoveredAttachRow[]) || [];
-  let rowsUpdated = 0;
-  let totalExternal = 0;
-
-  for (const row of rows) {
-    const byDomain = new Map<string, DiscoveredInQuery>();
-    for (const c of row.citations || []) {
-      const d = normalizeDomain(c.domain);
-      if (brandNorm && (d === brandNorm || d.endsWith('.' + brandNorm))) continue;
-      if (competitorDomainSet.has(d)) continue;
-
-      const hit = lookup.get(c.domain);
-      const entry: DiscoveredInQuery = {
-        domain: c.domain,
-        url: c.url,
-        title: c.title,
-        source_type: c.source_type,
-        label: hit?.label ?? null,
-        confidence: hit?.confidence ?? null,
-      };
-
-      // Dedupe by domain; prefer the labeled entry if one exists.
-      const existing = byDomain.get(c.domain);
-      if (!existing || (!existing.label && entry.label)) {
-        byDomain.set(c.domain, entry);
+  // 7) Per-poll write: LLM action (or deterministic fallback), citation_roles,
+  //    and discovered_in_query (external domains, tiered by aggregated judgment).
+  await mapWithConcurrency(
+    perQuery,
+    SUGGESTION_CONCURRENCY,
+    async ({ poll, llm }) => {
+      const citations = (poll.citations as Citation[]) || [];
+      const byDomain = new Map<string, DiscoveredInQuery>();
+      for (const c of citations) {
+        const d = normalizeDomain(c.domain);
+        if (!d) continue;
+        if (ownNorm && (d === ownNorm || d.endsWith('.' + ownNorm))) continue;
+        if (namedNorm.has(d)) continue;
+        const lk = labelLookup.get(d);
+        const entry: DiscoveredInQuery = {
+          domain: c.domain,
+          url: c.url,
+          title: c.title,
+          source_type: c.source_type,
+          label: lk?.label ?? null,
+          confidence: lk?.confidence ?? null,
+        };
+        const ex = byDomain.get(c.domain);
+        if (!ex || (!ex.label && entry.label)) byDomain.set(c.domain, entry);
       }
+      const discoveredInQuery = Array.from(byDomain.values());
+
+      const base = poll.suggestion;
+      const action = llm?.action?.trim() || base?.action || '';
+      const suggestion: Suggestion | null = base ? { ...base, action } : null;
+      const citationRoles: CitationRole[] = llm?.judgments ?? [];
+
+      await supabase
+        .from('poll_results')
+        .update({
+          suggestion,
+          citation_roles: citationRoles,
+          discovered_in_query: discoveredInQuery,
+        })
+        .eq('id', poll.id);
     }
-
-    const discoveredInQuery = Array.from(byDomain.values());
-    totalExternal += discoveredInQuery.length;
-
-    // Suggestion clause: only competitor-LABELED domains (audit-level), so we
-    // don't flood the suggestion with every unlabeled external domain.
-    const updatePayload: {
-      discovered_in_query: DiscoveredInQuery[];
-      suggestion?: Suggestion;
-    } = { discovered_in_query: discoveredInQuery };
-
-    const competitorDomains = discoveredInQuery
-      .filter((d) => d.label === 'competitor')
-      .map((d) => d.domain);
-    if (
-      row.suggestion &&
-      competitorDomains.length > 0 &&
-      !row.suggestion.action.includes(DISCOVERED_CLAUSE_MARKER)
-    ) {
-      updatePayload.suggestion = {
-        ...row.suggestion,
-        action: `${row.suggestion.action} ${DISCOVERED_CLAUSE_MARKER} ${competitorDomains.join(
-          ', '
-        )} — competitors you didn't name.`,
-      };
-    }
-
-    await supabase
-      .from('poll_results')
-      .update(updatePayload)
-      .eq('id', row.id);
-    rowsUpdated++;
-  }
-
-  const avgCount = rows.length > 0 ? totalExternal / rows.length : 0;
-  console.log(
-    '[discovered-per-query]',
-    auditId,
-    '— avg external domains/query:',
-    avgCount.toFixed(2)
   );
 
-  return rowsUpdated;
+  // 8) Insights + summary (read the now-updated polls). Suggestion situation/
+  //    severity are unchanged by the action swap, so these stay valid.
+  const insights = await computeInsights(auditId, env);
+  insights.discovered_competitor_count = competitorsList.length;
+  const summary = await computeSummary(auditId, brandName, namedCompetitors, env);
+  summary.headline = buildInsightHeadline(summary, insights);
+  const visibilityScore = Math.round((summary.visibility_rate ?? 0) * 100);
+
+  // 9) Finalize the audit row.
+  await supabase
+    .from('audits')
+    .update({
+      status: 'completed',
+      visibility_score: visibilityScore,
+      summary,
+      insights,
+      discovered_competitors: discovered,
+      positioning,
+      completed_at: new Date().toISOString(),
+    })
+    .eq('id', auditId);
+
+  console.log(
+    `[finalize] audit ${auditId} done — score ${visibilityScore}, ` +
+      `${competitorsList.length} discovered competitors, ` +
+      `${polls.length} suggestion calls + 1 positioning call`
+  );
 }
 
 /**

@@ -105,6 +105,12 @@ export interface DiscoveredInQuery {
   confidence: Confidence | null;
 }
 
+/** Per-query LLM judgment of a cited domain's role (rides on the suggestion call). */
+export interface CitationRole {
+  domain: string;
+  role: 'competitor' | 'source' | 'unsure';
+}
+
 /** Aggregate rollup computed at audit completion (audits.insights). */
 export interface AuditInsights {
   situation_distribution: Record<SuggestionSituation, number>;
@@ -145,6 +151,7 @@ export interface Audit {
   summary: AuditSummary | null;
   insights: AuditInsights | null;
   discovered_competitors: DiscoveredCompetitor[];
+  positioning: string | null;
   notes: string | null;
   error_message: string | null;
   created_at: string;
@@ -167,6 +174,7 @@ export interface PollResult {
   citations: Citation[];
   raw_citations: InlineCitation[];
   discovered_in_query: DiscoveredInQuery[];
+  citation_roles: CitationRole[];
   suggestion: Suggestion | null;
   created_at: string;
 }
