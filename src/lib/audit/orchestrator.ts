@@ -696,10 +696,17 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
         const suggestion: Suggestion | null = base ? { ...base, action } : null;
         const citationRoles: CitationRole[] = llm?.judgments ?? [];
 
+        // Two separate writes: the LLM suggestion depends only on the long-lived
+        // `suggestion` column (0002), so it lands even if the role/discovery
+        // columns (0005/0006) are missing. Bundling them previously meant a
+        // single absent column silently dropped the suggestion + roles together.
+        await supabase
+          .from('poll_results')
+          .update({ suggestion })
+          .eq('id', poll.id);
         await supabase
           .from('poll_results')
           .update({
-            suggestion,
             citation_roles: citationRoles,
             discovered_in_query: discoveredInQuery,
           })
@@ -749,12 +756,16 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
     const summary = await computeSummary(auditId, brandName, namedCompetitors, env);
     summary.headline = buildInsightHeadline(summary, insights);
 
+    // Core finalize data first (columns guaranteed present), then the
+    // enrichment markers separately so a missing 0006/0008 column can't drop
+    // the corrected summary/insights/discovered_competitors with it.
+    await supabase
+      .from('audits')
+      .update({ summary, insights, discovered_competitors: discovered })
+      .eq('id', auditId);
     await supabase
       .from('audits')
       .update({
-        summary,
-        insights,
-        discovered_competitors: discovered,
         positioning: positioning ?? '',
         brand_verdict: brandVerdict,
         competitor_verdicts: competitorVerdicts,

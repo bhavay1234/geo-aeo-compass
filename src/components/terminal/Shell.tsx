@@ -116,6 +116,14 @@ export function StatusBar() {
         <span className="tm-blip" />
         {liveText(audit)}
       </div>
+      <Link
+        to="/"
+        className="tm-toggle"
+        style={{ borderRight: "1px solid var(--grid)", textDecoration: "none" }}
+        aria-label="Start a new audit"
+      >
+        <span>+ NEW AUDIT</span>
+      </Link>
       <button className="tm-toggle" onClick={toggle} aria-label="Toggle theme">
         <span>{theme === "dark" ? "LIGHT" : "DARK"}</span>
         <span className="tm-sw" />

@@ -18,6 +18,7 @@ function unique(values: string[]): string[] {
  * the advice is specific, not generic.
  */
 export function buildSuggestion(input: {
+  query: string;
   brand_cited: boolean;
   brand_position: number | null;
   citations: Array<{
@@ -27,7 +28,10 @@ export function buildSuggestion(input: {
     url: string;
   }>;
 }): Suggestion {
-  const { brand_cited, brand_position, citations } = input;
+  const { query, brand_cited, brand_position, citations } = input;
+  // Quote the query in every action so titles are query-specific and never
+  // collapse to one identical template across rows.
+  const q = `"${query}"`;
 
   // A. Cited at a winning position.
   if (
@@ -38,7 +42,7 @@ export function buildSuggestion(input: {
     return {
       situation: 'winning',
       severity: 'low',
-      action: `You own this query (position ${brand_position}). Protect it — monitor for competitor displacement and keep the cited page fresh.`,
+      action: `You own ${q} (position ${brand_position}). Protect it — monitor for competitor displacement and keep the cited page fresh.`,
       evidence: `Cited at position ${brand_position}.`,
     };
   }
@@ -49,7 +53,7 @@ export function buildSuggestion(input: {
     return {
       situation: 'weak_position',
       severity: 'medium',
-      action: `You appear but rank low (position ${pos}). You're close — strengthen the page ChatGPT is citing with clearer entity signals, comparison framing, and structured data to climb.`,
+      action: `You appear for ${q} but rank low (position ${pos}). Strengthen the page ChatGPT is citing with clearer entity signals, comparison framing, and structured data to climb.`,
       evidence: `Cited but at position ${pos}.`,
     };
   }
@@ -60,10 +64,11 @@ export function buildSuggestion(input: {
   const competitorCites = citations.filter((c) => c.source_type === 'competitor');
   if (competitorCites.length > 0) {
     const domains = unique(competitorCites.map((c) => c.domain));
+    const more = domains.length > 1 ? ` (+${domains.length - 1} more)` : '';
     return {
       situation: 'losing_to_competitor',
       severity: 'high',
-      action: `A competitor is cited here and you are not, via ${domains[0]}. Build/optimize a dedicated page targeting this exact query and pursue presence on the cited source.`,
+      action: `Invisible on ${q} — ${domains.length} competitor${domains.length === 1 ? '' : 's'} cited (${domains[0]}${more}) and you are not. Build a dedicated page targeting this query and pursue presence on the cited source.`,
       evidence: `Competitor cited through ${domains.join(', ')}.`,
     };
   }
@@ -77,7 +82,7 @@ export function buildSuggestion(input: {
     return {
       situation: 'losing_to_competitor',
       severity: 'high',
-      action: `ChatGPT is sourcing this answer from ${domains[0]} where you're absent. Get listed/optimized on this review or analyst source — it's a direct citation path into the AI answer.`,
+      action: `ChatGPT sources ${q} from ${domains[0]} where you're absent. Get listed/optimized on this review or analyst source — it's a direct citation path into the AI answer.`,
       evidence: `Answer sourced from ${domains.join(', ')} without you.`,
     };
   }
@@ -88,7 +93,7 @@ export function buildSuggestion(input: {
     return {
       situation: 'open_opportunity',
       severity: 'medium',
-      action: `This answer cites external sources but no clear category leader. An authoritative, well-structured page targeting this query could capture the citation — open territory.`,
+      action: `For ${q}, ChatGPT cites ${domains.slice(0, 2).join(', ')} but no clear category leader. Publish an authoritative, well-structured page targeting this exact query to claim the citation — open territory.`,
       evidence: `Sources cited but no dominant brand: ${domains.join(', ')}.`,
     };
   }
@@ -97,7 +102,7 @@ export function buildSuggestion(input: {
   return {
     situation: 'authority_gap',
     severity: 'low',
-    action: `ChatGPT answered from its training, citing no live sources. Hardest to influence short-term — needs sustained brand-authority content the model ingests over time. Lower immediate priority.`,
+    action: `ChatGPT answered ${q} from training with no live sources. Build sustained brand-authority content the model ingests over time — lower immediate priority.`,
     evidence: `No live citations — model answered from memory.`,
   };
 }

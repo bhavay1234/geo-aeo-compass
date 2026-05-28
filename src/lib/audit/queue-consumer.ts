@@ -95,6 +95,7 @@ export async function processQueueBatch(
         }));
 
         const suggestion = buildSuggestion({
+          query: query_text,
           brand_cited: citation.brand_cited,
           brand_position: citation.brand_position,
           citations: enrichedCitations,
