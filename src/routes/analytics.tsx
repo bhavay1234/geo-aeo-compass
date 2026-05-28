@@ -34,6 +34,21 @@ const SITUATION_COLORS: Record<SuggestionSituation, string> = {
   authority_gap: "bg-muted-foreground",
 };
 
+function scoreColor(score: number): string {
+  if (score >= 70) return "text-success";
+  if (score >= 40) return "text-primary";
+  return "text-destructive";
+}
+
+function finding(score: number, cited: number, total: number): string {
+  if (total === 0) return "No queries in this audit.";
+  if (cited === 0)
+    return "Your brand is invisible in ChatGPT answers for these queries.";
+  if (score >= 70) return "Strong presence across buyer queries.";
+  if (score >= 40) return "Visible, but losing ground on key queries.";
+  return "Low visibility — a clear AEO gap to close.";
+}
+
 function AnalyticsPage() {
   return (
     <Workspace title="Analytics">
@@ -92,12 +107,17 @@ function AnalyticsInner() {
             AI Visibility Score
           </p>
           <div className="mt-2 flex items-baseline gap-1">
-            <span className="text-5xl font-bold tracking-tight text-card-foreground">
+            <span
+              className={`text-5xl font-bold tracking-tight ${scoreColor(score)}`}
+            >
               {score}
             </span>
             <span className="text-xl text-muted-foreground"> / 100</span>
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 text-sm font-medium text-card-foreground">
+            {finding(score, cited, total)}
+          </p>
+          <p className="mt-1 text-sm text-muted-foreground">
             Cited in {cited} of {total} buyer queries
           </p>
         </div>

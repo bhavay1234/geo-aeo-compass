@@ -21,22 +21,30 @@ const TIER_STYLES: Record<BrandTier, string> = {
   3: "border-muted-foreground/30 bg-muted text-muted-foreground",
 };
 
-const LISTICLE_PREFIXES = [
-  "best ",
-  "top ",
-  "how ",
-  "what ",
-  "why ",
-  "the ",
-  "a ",
-  "an ",
-  "compare",
-  "list",
-  "10 ",
+// Words that mark a title segment as an article/listicle fragment, not a brand.
+const TITLE_REJECT_WORDS = new Set([
+  "blog",
+  "table",
+  "comparison",
   "guide",
+  "top",
+  "best",
+  "list",
+  "vs",
   "review",
-  "vs ",
-];
+  "software",
+  "platform",
+  "tool",
+  "agent",
+  "solution",
+]);
+const TITLE_REJECT_GENERIC = new Set([
+  "insights",
+  "go",
+  "home",
+  "products",
+  "pricing",
+]);
 
 export function domainToBrand(domain: string): string {
   const core = normalizeDomain(domain).split(".")[0] || domain;
@@ -44,16 +52,26 @@ export function domainToBrand(domain: string): string {
   return core.charAt(0).toUpperCase() + core.slice(1);
 }
 
-/** Prefer a brand-looking slice of the page title; else derive from the domain. */
+function isUsableTitleSegment(seg: string): boolean {
+  if (!seg) return false;
+  const words = seg.split(/\s+/);
+  if (words.length > 3) return false;
+  const lowerWords = words.map((w) => w.toLowerCase().replace(/[^a-z0-9]/g, ""));
+  if (lowerWords.some((w) => TITLE_REJECT_WORDS.has(w))) return false;
+  if (words.length === 1 && TITLE_REJECT_GENERIC.has(lowerWords[0])) return false;
+  return true;
+}
+
+/**
+ * Derive a clean display name. DOMAIN-FIRST: citations always carry a domain,
+ * so strip www+TLD and capitalize (g2.com → G2, vapi.ai → Vapi). Only fall
+ * back to a title segment when there's no usable domain, and reject title
+ * fragments that read like article headings.
+ */
 export function deriveBrandName(title: string, domain: string): string {
+  if (normalizeDomain(domain)) return domainToBrand(domain);
   const seg = (title || "").split(/[|\-:–—]/)[0].trim();
-  const lower = seg.toLowerCase();
-  const looksBrand =
-    seg.length > 0 &&
-    seg.length <= 30 &&
-    seg.split(/\s+/).length <= 4 &&
-    !LISTICLE_PREFIXES.some((p) => lower.startsWith(p));
-  return looksBrand ? seg : domainToBrand(domain);
+  return isUsableTitleSegment(seg) ? seg : domain || "Unknown";
 }
 
 /**

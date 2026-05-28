@@ -6,6 +6,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { deriveBrandName } from "@/components/CitedBrands";
 import { updateNotes } from "@/lib/client/api";
 import type {
   PollResult,
@@ -26,6 +27,8 @@ export const Route = createFileRoute("/actions")({
   }),
   component: ActionsPage,
 });
+
+type PollWithSuggestion = PollResult & { suggestion: Suggestion };
 
 const SITUATION_ORDER: SuggestionSituation[] = [
   "losing_to_competitor",
@@ -54,6 +57,44 @@ const SEVERITY_STYLES: Record<Suggestion["severity"], string> = {
   medium: "border-warning/30 bg-warning/10 text-warning",
   low: "border-muted-foreground/30 bg-muted text-muted-foreground",
 };
+
+function cleanList(domains: string[], n = 3): string {
+  return domains.slice(0, n).map((d) => deriveBrandName("", d)).join(", ");
+}
+
+/**
+ * Per-query evidence line, derived ONLY from already-fetched poll_results.
+ * Differentiates otherwise-identical suggestions by their real citation
+ * signal. Returns null when a cited query has nothing extra to add.
+ */
+function querySignal(poll: PollResult): string | null {
+  const discovered = (poll.discovered_in_query ?? []).filter(
+    (d) => d.label === "competitor"
+  );
+  if (discovered.length > 0) {
+    return `Players winning this: ${cleanList(discovered.map((d) => d.domain))}`;
+  }
+  if (poll.brand_cited) return null;
+
+  const cites = poll.citations ?? [];
+  const reviewAnalyst = cites.filter(
+    (c) => c.source_type === "review_directory" || c.source_type === "analyst"
+  );
+  if (reviewAnalyst.length > 0) {
+    return `Sourced from ${cleanList(reviewAnalyst.map((c) => c.domain))} — review/analyst pages you're absent from.`;
+  }
+  const external = cites.filter((c) => c.source_type !== "own").map((c) => c.domain);
+  if (external.length > 0) {
+    return `Cited sources: ${cleanList(external)} — no category page owns this yet.`;
+  }
+  return "Answered from model training — no live sources; authority-content play, slower.";
+}
+
+interface Cluster {
+  action: string;
+  members: PollWithSuggestion[];
+  topSeverity: number;
+}
 
 function ActionsPage() {
   return (
@@ -86,23 +127,46 @@ function ActionsInner() {
 
   const highSeverity = audit.insights?.high_severity_count ?? 0;
   const withSuggestion = polls.filter(
-    (p): p is PollResult & { suggestion: Suggestion } => p.suggestion !== null
+    (p): p is PollWithSuggestion => p.suggestion !== null
   );
   const actionable = withSuggestion.filter(
     (p) => p.suggestion.situation !== "winning"
   ).length;
 
-  // Group by situation.
+  // Group by situation, then cluster by identical action text within a group.
   const groups = SITUATION_ORDER.map((situation) => {
-    const items = withSuggestion
-      .filter((p) => p.suggestion.situation === situation)
-      .sort(
-        (a, b) =>
-          SEVERITY_RANK[a.suggestion.severity] -
-          SEVERITY_RANK[b.suggestion.severity]
-      );
-    return { situation, items };
-  }).filter((g) => g.items.length > 0);
+    const items = withSuggestion.filter(
+      (p) => p.suggestion.situation === situation
+    );
+    if (items.length === 0) return null;
+
+    const clusterMap = new Map<string, PollWithSuggestion[]>();
+    for (const p of items) {
+      const key = p.suggestion.action;
+      const arr = clusterMap.get(key);
+      if (arr) arr.push(p);
+      else clusterMap.set(key, [p]);
+    }
+
+    const clusters: Cluster[] = Array.from(clusterMap.entries()).map(
+      ([action, members]) => ({
+        action,
+        members: members
+          .slice()
+          .sort(
+            (a, b) =>
+              SEVERITY_RANK[a.suggestion.severity] -
+              SEVERITY_RANK[b.suggestion.severity]
+          ),
+        topSeverity: Math.min(
+          ...members.map((m) => SEVERITY_RANK[m.suggestion.severity])
+        ),
+      })
+    );
+    clusters.sort((a, b) => a.topSeverity - b.topSeverity);
+
+    return { situation, clusters, count: items.length };
+  }).filter((g): g is NonNullable<typeof g> => g !== null);
 
   return (
     <div className="space-y-6">
@@ -110,9 +174,7 @@ function ActionsInner() {
         <h2 className="text-2xl font-bold tracking-tight text-card-foreground">
           {audit.brand_name}
         </h2>
-        <p className="text-sm text-muted-foreground">
-          {audit.domain} · ChatGPT
-        </p>
+        <p className="text-sm text-muted-foreground">{audit.domain} · ChatGPT</p>
       </div>
 
       {/* Top strip */}
@@ -155,35 +217,65 @@ function ActionsInner() {
                 {SITUATION_LABELS[g.situation]}
               </h3>
               <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                {g.items.length}
+                {g.count}
               </span>
             </div>
             <div className="space-y-3">
-              {g.items.map((p) => (
-                <div
-                  key={p.id}
-                  className="rounded-xl border border-border bg-card p-5"
-                >
-                  <div className="mb-1.5 flex items-start justify-between gap-3">
-                    <p className="text-sm font-semibold text-card-foreground">
-                      {p.query_text}
-                    </p>
-                    <Badge
-                      variant="outline"
-                      className={SEVERITY_STYLES[p.suggestion.severity]}
-                    >
-                      {p.suggestion.severity}
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {p.suggestion.action}
-                  </p>
-                </div>
+              {g.clusters.map((cluster, ci) => (
+                <ClusterCard key={ci} cluster={cluster} />
               ))}
             </div>
           </section>
         ))
       )}
+    </div>
+  );
+}
+
+function ClusterCard({ cluster }: { cluster: Cluster }) {
+  const merged = cluster.members.length > 1;
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm text-card-foreground">{cluster.action}</p>
+        {merged ? (
+          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+            {cluster.members.length} queries
+          </span>
+        ) : (
+          <Badge
+            variant="outline"
+            className={SEVERITY_STYLES[cluster.members[0].suggestion.severity]}
+          >
+            {cluster.members[0].suggestion.severity}
+          </Badge>
+        )}
+      </div>
+
+      <div className="mt-3 divide-y divide-border border-t border-border">
+        {cluster.members.map((p) => {
+          const signal = merged ? querySignal(p) : null;
+          return (
+            <div key={p.id} className="py-2.5 first:pt-3">
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-sm font-medium text-card-foreground">
+                  {p.query_text}
+                </span>
+                <Badge
+                  variant="outline"
+                  className={SEVERITY_STYLES[p.suggestion.severity]}
+                >
+                  {p.suggestion.severity}
+                </Badge>
+              </div>
+              {signal && (
+                <p className="mt-1 text-xs text-muted-foreground">{signal}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -199,7 +291,6 @@ function NotesEditor({
   const [notes, setNotes] = useState(initialNotes);
   const [saved, setSaved] = useState(false);
 
-  // Reset local state when switching audits.
   useEffect(() => {
     setNotes(initialNotes);
     setSaved(false);

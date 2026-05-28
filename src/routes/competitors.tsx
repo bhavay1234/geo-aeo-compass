@@ -1,9 +1,15 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Workspace, useWorkspace } from "@/components/Workspace";
 import { EmptyState } from "@/components/EmptyState";
 import { Badge } from "@/components/ui/badge";
 import { domainToBrand } from "@/components/CitedBrands";
-import type { Confidence, DiscoveredCompetitor } from "@/lib/db/types";
+import { normalizeDomain } from "@/lib/audit/source-classifier";
+import type {
+  Confidence,
+  DiscoveredCompetitor,
+  PollResult,
+} from "@/lib/db/types";
 import { Users, ExternalLink } from "lucide-react";
 
 export const Route = createFileRoute("/competitors")({
@@ -24,6 +30,57 @@ const CONFIDENCE_STYLES: Record<Confidence, string> = {
   medium: "border-warning/30 bg-warning/10 text-warning",
   low: "border-muted-foreground/30 bg-muted text-muted-foreground",
 };
+
+function queriesForDomain(polls: PollResult[], domain: string): string[] {
+  const dn = normalizeDomain(domain);
+  return polls
+    .filter((p) =>
+      (p.discovered_in_query ?? []).some((d) => normalizeDomain(d.domain) === dn)
+    )
+    .map((p) => p.query_text);
+}
+
+function queriesForName(polls: PollResult[], name: string): string[] {
+  return polls
+    .filter((p) => (p.competitors_cited ?? []).some((c) => c.name === name))
+    .map((p) => p.query_text);
+}
+
+function ExpandableQueryList({ queries }: { queries: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (queries.length === 0) {
+    return (
+      <p className="mt-3 text-xs text-muted-foreground">
+        No matching queries.
+      </p>
+    );
+  }
+  const visible = expanded ? queries : queries.slice(0, 3);
+  const overflow = queries.length - visible.length;
+  return (
+    <ul className="mt-3 space-y-1">
+      {visible.map((q, i) => (
+        <li key={i} className="flex gap-1.5 text-xs text-muted-foreground">
+          <span className="text-muted-foreground/50">•</span>
+          <span className="min-w-0 flex-1 truncate" title={q}>
+            {q}
+          </span>
+        </li>
+      ))}
+      {!expanded && overflow > 0 && (
+        <li>
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="text-xs font-medium text-primary hover:underline"
+          >
+            and {overflow} more
+          </button>
+        </li>
+      )}
+    </ul>
+  );
+}
 
 function CompetitorsPage() {
   return (
@@ -60,26 +117,21 @@ function CompetitorsInner() {
     .sort((a, b) => b.queries_seen_in - a.queries_seen_in);
   const otherSources = discovered.filter((d) => d.label !== "competitor");
 
-  // Named competitors with how many queries each was cited in.
-  const named = (audit.competitors ?? []).map((name) => {
-    const count = polls.filter((p) =>
-      (p.competitors_cited ?? []).some((c) => c.name === name)
-    ).length;
-    return { name, count };
-  });
+  const named = (audit.competitors ?? []).map((name) => ({
+    name,
+    queries: queriesForName(polls, name),
+  }));
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-10">
       <div>
         <h2 className="text-2xl font-bold tracking-tight text-card-foreground">
           {audit.brand_name}
         </h2>
-        <p className="text-sm text-muted-foreground">
-          {audit.domain} · ChatGPT
-        </p>
+        <p className="text-sm text-muted-foreground">{audit.domain} · ChatGPT</p>
       </div>
 
-      {/* Discovered competitors — the eye-opener */}
+      {/* Discovered competitors */}
       <section>
         <h3 className="text-lg font-semibold text-card-foreground">
           Discovered competitors
@@ -96,7 +148,11 @@ function CompetitorsInner() {
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {discoveredCompetitors.map((d) => (
-              <DiscoveredCard key={d.domain} d={d} />
+              <DiscoveredCard
+                key={d.domain}
+                d={d}
+                queries={queriesForDomain(polls, d.domain)}
+              />
             ))}
           </div>
         )}
@@ -108,25 +164,31 @@ function CompetitorsInner() {
           Named competitors
         </h3>
         <p className="mb-4 text-sm text-muted-foreground">
-          The rivals you listed, and how many queries each was cited in.
+          The rivals you listed, and the queries each was cited in.
         </p>
         {named.length === 0 ? (
           <p className="rounded-xl border border-dashed border-border bg-card px-4 py-8 text-center text-sm text-muted-foreground">
             You didn't name any competitors for this audit.
           </p>
         ) : (
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+          <div className="space-y-3">
             {named.map((c) => (
               <div
                 key={c.name}
-                className="flex items-center justify-between px-5 py-3"
+                className="rounded-xl border border-border bg-card p-5"
               >
-                <span className="font-medium text-card-foreground">
-                  {c.name}
-                </span>
-                <span className="text-sm text-muted-foreground">
-                  cited in {c.count} quer{c.count === 1 ? "y" : "ies"}
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-card-foreground">
+                    {c.name}
+                  </span>
+                  <span className="text-sm text-muted-foreground">
+                    cited in {c.queries.length} quer
+                    {c.queries.length === 1 ? "y" : "ies"}
+                  </span>
+                </div>
+                {c.queries.length > 0 && (
+                  <ExpandableQueryList queries={c.queries} />
+                )}
               </div>
             ))}
           </div>
@@ -143,24 +205,29 @@ function CompetitorsInner() {
             Directories, reviews, and publishers ChatGPT cited — citation
             sources, not competitors.
           </p>
-          <div className="rounded-xl border border-border bg-card divide-y divide-border">
+          <div className="space-y-3">
             {otherSources.map((d) => (
               <div
                 key={d.domain}
-                className="flex items-center justify-between px-5 py-3"
+                className="rounded-xl border border-border bg-card p-5"
               >
-                <div>
-                  <span className="font-medium text-card-foreground">
-                    {d.domain}
-                  </span>
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    {d.label}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="font-semibold text-card-foreground">
+                      {d.domain}
+                    </span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {d.label}
+                    </span>
+                  </div>
+                  <span className="shrink-0 text-sm text-muted-foreground">
+                    cited in {d.queries_seen_in} quer
+                    {d.queries_seen_in === 1 ? "y" : "ies"}
                   </span>
                 </div>
-                <span className="text-sm text-muted-foreground">
-                  cited in {d.queries_seen_in} quer
-                  {d.queries_seen_in === 1 ? "y" : "ies"}
-                </span>
+                <ExpandableQueryList
+                  queries={queriesForDomain(polls, d.domain)}
+                />
               </div>
             ))}
           </div>
@@ -170,9 +237,15 @@ function CompetitorsInner() {
   );
 }
 
-function DiscoveredCard({ d }: { d: DiscoveredCompetitor }) {
+function DiscoveredCard({
+  d,
+  queries,
+}: {
+  d: DiscoveredCompetitor;
+  queries: string[];
+}) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
+    <div className="flex flex-col rounded-xl border border-border bg-card p-5">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate font-semibold text-card-foreground">
@@ -205,6 +278,9 @@ function DiscoveredCard({ d }: { d: DiscoveredCompetitor }) {
           </span>{" "}
           citation{d.citation_count === 1 ? "" : "s"}
         </span>
+      </div>
+      <div className="mt-1 border-t border-border pt-1">
+        <ExpandableQueryList queries={queries} />
       </div>
     </div>
   );
