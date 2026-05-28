@@ -59,10 +59,9 @@ function subline(g: GapRow): { __html: string } {
 
 function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const { audits } = useWorkspace();
+  const brand = audit.brand_name;
   const gaps = buildGapRows(audit, polls);
   const sovFull = computeShareOfVoice(audit, polls);
-  const sov = sovFull.slice(0, 5);
-  const sovMax = Math.max(1, ...sov.map((s) => s.pct));
 
   const total = polls.length;
   const absent = gaps.filter((g) => g.state === "absent").length;
@@ -74,6 +73,21 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const leader = sovFull[0] ?? null;
   const youEntry = sovFull.find((s) => s.isYou) ?? null;
   const youRank = sovFull.findIndex((s) => s.isYou) + 1; // 0 → not cited at all
+  const topComps = sovFull
+    .filter((s) => !s.isYou)
+    .slice(0, 2)
+    .map((s) => s.name);
+
+  // Always show the brand in the SoV chart — at 0% ("not cited") if absent — so
+  // the panel never collapses to a broken-looking blank for a first-time viewer.
+  const hasSov = sovFull.length > 0;
+  const sov = youEntry
+    ? sovFull.slice(0, 5)
+    : [
+        ...sovFull.slice(0, 4),
+        { name: brand, domain: audit.domain, count: 0, pct: 0, isYou: true },
+      ];
+  const sovMax = Math.max(1, ...sov.map((s) => s.pct));
 
   // Trajectory from prior completed runs of the same brand+domain.
   const runs = audits
@@ -93,32 +107,106 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const delta =
     scores.length >= 2 ? score - scores[scores.length - 2] : null;
 
+  const compClause =
+    topComps.length > 0 ? (
+      <>
+        {" "}— competitors like{" "}
+        <b style={{ color: "var(--ink)" }}>{topComps.join(" and ")}</b> are being
+        recommended instead
+      </>
+    ) : null;
+
+  const verdict =
+    total === 0 ? (
+      <>Run in progress — no queries scored yet.</>
+    ) : absent > 0 ? (
+      <>
+        <b style={{ color: "var(--you)" }}>{brand}</b> is{" "}
+        <b style={{ color: "var(--hot)" }}>invisible</b> in{" "}
+        <b style={{ color: "var(--hot)" }}>
+          {absent} of {total}
+        </b>{" "}
+        high-intent ChatGPT queries{compClause}.
+      </>
+    ) : weak > 0 ? (
+      <>
+        <b style={{ color: "var(--you)" }}>{brand}</b> is cited in all{" "}
+        <b>{total}</b> high-intent ChatGPT queries but ranks below the top on{" "}
+        <b style={{ color: "var(--warn)" }}>{weak}</b>
+        {topComps.length > 0 ? (
+          <>
+            {" "}— <b style={{ color: "var(--ink)" }}>{topComps.join(" and ")}</b>{" "}
+            are cited above it
+          </>
+        ) : null}
+        .
+      </>
+    ) : (
+      <>
+        <b style={{ color: "var(--you)" }}>{brand}</b> is cited in{" "}
+        <b style={{ color: "var(--pos)" }}>all {total}</b> high-intent ChatGPT
+        queries
+        {youEntry ? (
+          <>
+            {" "}and leads citation share at <b>{youEntry.pct}%</b>
+          </>
+        ) : null}
+        .
+      </>
+    );
+
   return (
-    <div className="tm-grid">
-      {/* FOCAL: visibility gaps */}
+    <>
+      <div
+        style={{
+          padding: "20px 20px 18px",
+          borderBottom: "1px solid var(--grid-2)",
+          background: "var(--panel)",
+        }}
+      >
+        <p
+          className="nar"
+          style={{
+            fontSize: 22,
+            lineHeight: 1.42,
+            fontWeight: 500,
+            color: "var(--ink-2)",
+            maxWidth: 1040,
+            letterSpacing: "-.01em",
+          }}
+        >
+          {verdict}
+        </p>
+      </div>
+      <div className="tm-grid">
+        {/* FOCAL: visibility gaps */}
       <div className="tm-panel tm-gap-span tm-reveal">
         <div className="tm-phead">
           <h2>◧ Visibility gaps · ranked by lost demand</h2>
           <span className="meta">{gaps.length} queries</span>
         </div>
-        {gaps.map((g, i) => (
-          <Link
-            key={g.id}
-            to="/queries"
-            search={(prev) => ({ ...prev })}
-            className={`tm-gap ${g.state}`}
-          >
-            <span className="tm-rank">{String(i + 1).padStart(2, "0")}</span>
-            <div className="tm-q">
-              <div className="t">{g.query}</div>
-              <div className="s" dangerouslySetInnerHTML={subline(g)} />
-            </div>
-            <BleedBar state={g.state} seed={i} />
-            <div className="tm-gstate">
-              <StatePill state={g.state} />
-            </div>
-          </Link>
-        ))}
+        {gaps.length === 0 ? (
+          <div className="tm-empty">No queries scored in this run yet.</div>
+        ) : (
+          gaps.map((g, i) => (
+            <Link
+              key={g.id}
+              to="/queries"
+              search={(prev) => ({ ...prev })}
+              className={`tm-gap ${g.state}`}
+            >
+              <span className="tm-rank">{String(i + 1).padStart(2, "0")}</span>
+              <div className="tm-q">
+                <div className="t">{g.query}</div>
+                <div className="s" dangerouslySetInnerHTML={subline(g)} />
+              </div>
+              <BleedBar state={g.state} seed={i} />
+              <div className="tm-gstate">
+                <StatePill state={g.state} />
+              </div>
+            </Link>
+          ))
+        )}
       </div>
 
       {/* Share of voice */}
@@ -161,6 +249,11 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
               </span>
             )}
           </div>
+          {!hasSov && (
+            <div className="tm-empty" style={{ padding: "28px 8px 8px" }}>
+              No brands cited in this run yet.
+            </div>
+          )}
           <div className="tm-sov-chart">
             <div className="tm-yaxis">
               <span>{sovMax}%</span>
@@ -209,7 +302,9 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
                   }}
                 />
                 <span className="nm">{s.name}</span>
-                <b className="mono">{s.pct}%</b>
+                <b className="mono">
+                  {s.isYou && s.pct === 0 ? "not cited" : `${s.pct}%`}
+                </b>
               </div>
             ))}
           </div>
@@ -283,6 +378,7 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
           </p>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
