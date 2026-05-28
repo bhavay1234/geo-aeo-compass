@@ -42,7 +42,7 @@ function CompetitorsView({ audit, polls }: { audit: Audit; polls: PollResult[] }
     <div>
       <div className="tm-toolbar">
         <span className="tm-sort mono" style={{ paddingLeft: 16 }}>
-          {profiles.length} brands · sorted by share of voice
+          {profiles.length} brands · sorted by recommendation share
         </span>
       </div>
       <div className="tm-rows">

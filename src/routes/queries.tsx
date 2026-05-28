@@ -3,9 +3,13 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Workspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
 import { PositionDots, SourceTag } from "@/components/terminal/primitives";
-import { queryState, tagSource, type QueryState } from "@/components/terminal/derive";
+import {
+  queryState,
+  tagSource,
+  recommendedBrands,
+  type QueryState,
+} from "@/components/terminal/derive";
 import { normalizeDomain } from "@/lib/audit/source-classifier";
-import { deriveBrandName } from "@/components/CitedBrands";
 import type { Audit, PollResult, Citation } from "@/lib/db/types";
 
 export const Route = createFileRoute("/queries")({
@@ -189,12 +193,13 @@ function QueryRow({
       .map((r) => normalizeDomain(r.domain))
   );
 
-  const compNames = [
-    ...(poll.competitors_cited ?? []).map((c) => c.name),
-    ...(poll.discovered_in_query ?? [])
-      .filter((d) => d.label === "competitor")
-      .map((d) => deriveBrandName(d.title, d.domain)),
-  ];
+  // BRANDS NAMED in the prose — the real competitor signal (≠ cited domains).
+  const namedSet = new Set((audit.competitors ?? []).map((c) => c.toLowerCase()));
+  const recommended = recommendedBrands(poll, audit.brand_name).map((name) => ({
+    name,
+    tracked: namedSet.has(name.toLowerCase()),
+  }));
+  const compNames = recommended.map((r) => r.name);
 
   return (
     <div className={`tm-qr ${stateClass} ${open ? "open" : ""}`}>
@@ -221,7 +226,16 @@ function QueryRow({
             <span style={{ color: "var(--ink-3)" }}>—</span>
           )}
         </div>
-        <div className="tm-qr-srcs mono">{citations.length} cited</div>
+        <div
+          className="tm-qr-srcs mono"
+          title="competitor brands recommended · sources cited"
+        >
+          <span style={{ color: "var(--ink)", fontWeight: 700 }}>
+            {recommended.length}
+          </span>{" "}
+          rec
+          <span style={{ color: "var(--ink-3)" }}> · {citations.length} src</span>
+        </div>
         <span className={`tm-badge ${badge.cls === "ba" ? "tm-b-inv" : badge.cls === "bw" ? "tm-b-weak" : "tm-b-held"}`}>
           {badge.txt}
         </span>
@@ -248,7 +262,46 @@ function QueryRow({
             </div>
           </div>
           <div className="tm-srcs">
-            <div className="lbl">Cited sources · {ordered.length}</div>
+            {/* Panel 1: the competitor signal — brands NAMED in the prose. */}
+            <div className="lbl" style={{ color: "var(--hot)" }}>
+              Recommended instead of you · {recommended.length}
+            </div>
+            {recommended.length === 0 ? (
+              <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 18 }}>
+                No competing products named in this answer.
+              </p>
+            ) : (
+              <div
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 6,
+                  marginBottom: 20,
+                }}
+              >
+                {recommended.map((r, i) => (
+                  <span
+                    key={i}
+                    className="tm-chip"
+                    title={r.tracked ? "tracked competitor" : "discovered — not on your list"}
+                    style={{
+                      background: r.tracked ? "var(--neg-bg)" : "var(--panel-2)",
+                      color: r.tracked ? "var(--neg)" : "var(--ink-2)",
+                    }}
+                  >
+                    {r.name}
+                    {!r.tracked && (
+                      <small style={{ marginLeft: 5, opacity: 0.7, fontWeight: 700 }}>
+                        discovered
+                      </small>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Panel 2: where ChatGPT sourced this — the "get listed" signal. */}
+            <div className="lbl">Where ChatGPT sourced this · {ordered.length}</div>
             {ordered.length === 0 ? (
               <p style={{ fontSize: 12, color: "var(--ink-3)" }}>
                 No live sources — answered from training.

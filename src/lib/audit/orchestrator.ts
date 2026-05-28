@@ -26,12 +26,6 @@ import type {
   BrandVerdict,
 } from '../db/types';
 
-/** Lightweight brand name from a domain (server-safe; no React imports). */
-function cleanNameFromDomain(domain: string): string {
-  const core = normalizeDomain(domain).split('.')[0] || domain;
-  return core ? core.charAt(0).toUpperCase() + core.slice(1) : domain;
-}
-
 const BATCH_SIZE = 3;
 
 /**
@@ -711,8 +705,31 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
             discovered_in_query: discoveredInQuery,
           })
           .eq('id', poll.id);
+        // brands_named (0009) isolated so an unmigrated column can't drop the
+        // roles/discovery write above.
+        await supabase
+          .from('poll_results')
+          .update({ brands_named: llm?.brandsNamed ?? [] })
+          .eq('id', poll.id);
       })
     );
+
+    // Competitor signal = BRANDS NAMED in prose (not cited domains). Aggregate
+    // the run's named brands; "discovered" = named in an answer but not tracked.
+    const ownLower = brandName.trim().toLowerCase();
+    const namedLower = new Set(namedCompetitors.map((n) => n.trim().toLowerCase()));
+    const brandsNamedAll = new Map<string, string>(); // lower -> display
+    for (const { llm } of perQuery) {
+      for (const b of llm?.brandsNamed ?? []) {
+        const nm = b.trim();
+        const k = nm.toLowerCase();
+        if (!nm || k === ownLower || brandsNamedAll.has(k)) continue;
+        brandsNamedAll.set(k, nm);
+      }
+    }
+    const discoveredBrands = Array.from(brandsNamedAll.entries())
+      .filter(([k]) => !namedLower.has(k))
+      .map(([, nm]) => nm);
 
     // 6) Recompute insights/summary with the corrected competitor count, then
     //    persist in THREE staged writes so a missing/unmigrated column can't
@@ -723,7 +740,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
     //    Verdicts are also the slowest (N mini-calls), so writing the core
     //    first means competitor data lands even if verdicts are slow or fail.
     const insights = await computeInsights(auditId, env);
-    insights.discovered_competitor_count = competitorsList.length;
+    insights.discovered_competitor_count = discoveredBrands.length;
     const summary = await computeSummary(auditId, brandName, namedCompetitors, env);
     summary.headline = buildInsightHeadline(summary, insights);
 
@@ -745,9 +762,9 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
         domain: competitorToDomain(n),
         isYou: false,
       })),
-      ...competitorsList.map((d) => ({
-        name: cleanNameFromDomain(d.domain),
-        domain: d.domain,
+      ...discoveredBrands.map((name) => ({
+        name,
+        domain: competitorToDomain(name),
         isYou: false,
       })),
     ];

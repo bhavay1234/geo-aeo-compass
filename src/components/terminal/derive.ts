@@ -1,5 +1,4 @@
 import type { Audit, PollResult, Citation } from "@/lib/db/types";
-import { deriveBrandName, domainToBrand } from "@/components/CitedBrands";
 import { normalizeDomain, competitorToDomain } from "@/lib/audit/source-classifier";
 
 export type QueryState = "absent" | "weak" | "held";
@@ -56,25 +55,44 @@ export function competitorDomainsInPoll(p: PollResult): Set<string> {
   return out;
 }
 
-/** Clean display names of the competitor brands cited in one query (excl. own). */
-export function whoCited(p: PollResult, ownNorm: string): string[] {
+/**
+ * Competitor brands ChatGPT NAMED in ONE answer's prose (excl. the audited
+ * brand). The real competitor signal: union of tracked-list prose matches
+ * (competitors_cited) + the LLM-extracted brands_named. NOT cited domains —
+ * those are sources, tagged separately via tagSource.
+ */
+export function recommendedBrands(p: PollResult, ownName: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
+  const own = (ownName || "").trim().toLowerCase();
   const add = (name: string) => {
     const nm = (name || "").trim();
     const key = nm.toLowerCase();
-    if (nm && !seen.has(key)) {
-      seen.add(key);
-      out.push(nm);
-    }
+    if (!nm || key === own || seen.has(key)) return;
+    seen.add(key);
+    out.push(nm);
   };
   for (const c of p.competitors_cited ?? []) add(c.name);
-  for (const dom of competitorDomainsInPoll(p)) {
-    if (ownNorm && (dom === ownNorm || dom.endsWith("." + ownNorm))) continue;
-    const diq = (p.discovered_in_query ?? []).find(
-      (d) => normalizeDomain(d.domain) === dom
-    );
-    add(diq ? deriveBrandName(diq.title, diq.domain) : domainToBrand(dom));
+  for (const b of p.brands_named ?? []) add(b);
+  return out;
+}
+
+/** Competitor brands recommended in a query (excl. own) — the gap-row signal. */
+export function whoCited(p: PollResult, ownName: string): string[] {
+  return recommendedBrands(p, ownName);
+}
+
+/** Unique competitor brands NAMED across the whole run (named + discovered). */
+export function allCompetitorBrands(audit: Audit, polls: PollResult[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of polls) {
+    for (const nm of recommendedBrands(p, audit.brand_name)) {
+      const k = nm.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(nm);
+    }
   }
   return out;
 }
@@ -96,11 +114,10 @@ const STATE_WEIGHT: Record<QueryState, number> = { absent: 3, weak: 2, held: 1 }
  * spec's fallback: citation-absence + competitor-count (NO /mo figures faked).
  */
 export function buildGapRows(audit: Audit, polls: PollResult[]): GapRow[] {
-  const ownNorm = normalizeDomain(audit.domain);
   return polls
     .map((p) => {
       const state = queryState(p);
-      const who = whoCited(p, ownNorm);
+      const who = whoCited(p, audit.brand_name);
       const citedCount = (p.citations ?? []).length;
       const rankScore = STATE_WEIGHT[state] * 1000 + who.length * 25 + citedCount;
       return {
@@ -125,16 +142,11 @@ export interface SovEntry {
 }
 
 /**
- * Share of voice = CITATION SHARE across answers (not search impressions —
- * we don't have volume). Each brand is counted once per query it appears in.
+ * Share of RECOMMENDATIONS across answers — the share a buyer understands:
+ * "of all the products ChatGPT names, how often is it you vs each competitor?"
+ * Counts BRANDS NAMED in prose (not cited domains). Each brand once per query.
  */
 export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry[] {
-  const ownNorm = normalizeDomain(audit.domain);
-  const namedNorm = new Set(
-    (audit.competitors ?? [])
-      .map((c) => normalizeDomain(competitorToDomain(c)))
-      .filter(Boolean)
-  );
   const counts = new Map<string, { name: string; domain: string | null; count: number; isYou: boolean }>();
   const bump = (key: string, name: string, domain: string | null, isYou: boolean) => {
     const ex = counts.get(key);
@@ -143,32 +155,12 @@ export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry
   };
 
   for (const p of polls) {
-    const perQuery = new Set<string>();
-    if (p.brand_cited) perQuery.add("you");
-    for (const c of p.competitors_cited ?? []) {
-      const nm = (c.name || "").trim();
-      if (nm) perQuery.add("name:" + nm.toLowerCase());
-    }
-    for (const dn of competitorDomainsInPoll(p)) {
-      if (ownNorm && (dn === ownNorm || dn.endsWith("." + ownNorm))) continue;
-      if (namedNorm.has(dn)) continue; // named handled via the name key
-      perQuery.add("dom:" + dn);
-    }
-    // Resolve keys → entries.
-    for (const key of perQuery) {
-      if (key === "you") bump("you", audit.brand_name, audit.domain, true);
-      else if (key.startsWith("name:")) {
-        const nm = key.slice(5);
-        const orig =
-          (audit.competitors ?? []).find((c) => c.toLowerCase() === nm) || nm;
-        bump(key, orig, competitorToDomain(orig), false);
-      } else {
-        const dn = key.slice(4);
-        const dc = (audit.discovered_competitors ?? []).find(
-          (x) => normalizeDomain(x.domain) === dn
-        );
-        bump(key, domainToBrand(dn), dc?.domain ?? dn, false);
-      }
+    if (p.brand_cited) bump("__you__", audit.brand_name, audit.domain, true);
+    for (const nm of recommendedBrands(p, audit.brand_name)) {
+      const orig =
+        (audit.competitors ?? []).find((c) => c.toLowerCase() === nm.toLowerCase()) ||
+        nm;
+      bump("name:" + nm.toLowerCase(), orig, competitorToDomain(orig), false);
     }
   }
 
@@ -205,26 +197,16 @@ function tierForPct(pct: number): 1 | 2 | 3 {
   return 3;
 }
 
-/** Does this poll cite the given entity (by name for named, by domain otherwise)? */
-function pollCitesEntity(
+/** Does this poll NAME the given brand as an answer (prose-based)? */
+function pollRecommends(
   p: PollResult,
   isYou: boolean,
   name: string,
-  domainNorm: string
+  ownName: string
 ): boolean {
   if (isYou) return p.brand_cited;
-  if ((p.competitors_cited ?? []).some((c) => c.name.toLowerCase() === name.toLowerCase()))
-    return true;
-  if (!domainNorm) return false;
-  return (
-    (p.discovered_in_query ?? []).some(
-      (d) => normalizeDomain(d.domain) === domainNorm
-    ) ||
-    (p.citations ?? []).some((c) => normalizeDomain(c.domain) === domainNorm) ||
-    (p.citation_roles ?? []).some(
-      (r) => r.role === "competitor" && normalizeDomain(r.domain) === domainNorm
-    )
-  );
+  const nl = name.toLowerCase();
+  return recommendedBrands(p, ownName).some((b) => b.toLowerCase() === nl);
 }
 
 /**
@@ -240,36 +222,29 @@ export function buildCompetitorProfiles(
   const namedNorm = new Set(
     (audit.competitors ?? []).map((c) => normalizeDomain(c)).filter(Boolean)
   );
-  const namedDomainNorm = new Set(
-    (audit.competitors ?? [])
-      .map((c) => normalizeDomain(competitorToDomain(c)))
-      .filter(Boolean)
+  const namedLower = new Set(
+    (audit.competitors ?? []).map((c) => c.trim().toLowerCase()).filter(Boolean)
   );
 
-  // Same-industry competitors cited anywhere in the run, from per-query LLM
-  // role judgments — resilient even if the audit-level discovered_competitors
-  // aggregation never persisted. norm domain -> display name.
-  const roleCompetitors = new Map<string, string>();
-  for (const p of polls) {
-    for (const dom of competitorDomainsInPoll(p)) {
-      if (!dom || dom === ownNorm || dom.endsWith("." + ownNorm)) continue;
-      if (namedDomainNorm.has(dom) || roleCompetitors.has(dom)) continue;
-      const diq = (p.discovered_in_query ?? []).find(
-        (d) => normalizeDomain(d.domain) === dom
-      );
-      roleCompetitors.set(
-        dom,
-        diq ? deriveBrandName(diq.title, diq.domain) : domainToBrand(dom)
-      );
-    }
-  }
-
+  // Source-rail tagging only: which CITED DOMAINS are competitor-owned (from the
+  // per-query LLM role judgments). Kept separate from the competitor brand list.
   const competitorJudged = new Set<string>([
     ...(audit.discovered_competitors ?? [])
       .filter((d) => d.label === "competitor")
       .map((d) => normalizeDomain(d.domain)),
-    ...roleCompetitors.keys(),
   ]);
+  for (const p of polls) {
+    for (const dom of competitorDomainsInPoll(p)) competitorJudged.add(dom);
+  }
+
+  // Competitor BRANDS named anywhere in the run (prose signal). lower -> display.
+  const recAll = new Map<string, string>();
+  for (const p of polls) {
+    for (const nm of recommendedBrands(p, audit.brand_name)) {
+      const k = nm.toLowerCase();
+      if (!recAll.has(k)) recAll.set(k, nm);
+    }
+  }
 
   const verdictByKey = new Map<string, string>();
   for (const v of audit.competitor_verdicts ?? []) {
@@ -288,6 +263,9 @@ export function buildCompetitorProfiles(
   }
 
   type Entity = { name: string; domain: string | null; isYou: boolean; discovered: boolean };
+  const discoveredBrands = Array.from(recAll.entries())
+    .filter(([k]) => !namedLower.has(k))
+    .map(([, name]) => name);
   const entities: Entity[] = [
     { name: audit.brand_name, domain: audit.domain, isYou: true, discovered: false },
     ...(audit.competitors ?? []).map((n) => ({
@@ -296,17 +274,9 @@ export function buildCompetitorProfiles(
       isYou: false,
       discovered: false,
     })),
-    ...(audit.discovered_competitors ?? [])
-      .filter((d) => d.label === "competitor")
-      .map((d) => ({
-        name: domainToBrand(d.domain),
-        domain: d.domain,
-        isYou: false,
-        discovered: true,
-      })),
-    ...Array.from(roleCompetitors.entries()).map(([dom, name]) => ({
+    ...discoveredBrands.map((name) => ({
       name,
-      domain: dom,
+      domain: competitorToDomain(name),
       isYou: false,
       discovered: true,
     })),
@@ -322,7 +292,9 @@ export function buildCompetitorProfiles(
 
   const profiles: CompetitorProfile[] = uniq.map((e) => {
     const dn = e.domain ? normalizeDomain(e.domain) : "";
-    const appears = polls.filter((p) => pollCitesEntity(p, e.isYou, e.name, dn));
+    const appears = polls.filter((p) =>
+      pollRecommends(p, e.isYou, e.name, audit.brand_name)
+    );
     const strengths = appears.map((p) => p.query_text).slice(0, 4);
     const beatsYou = e.isYou
       ? []

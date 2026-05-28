@@ -159,9 +159,13 @@ const SUGGESTION_SYSTEM =
   'current answer/citations.\n' +
   '- Also judge EACH cited domain: is it a rival product/company (competitor) or a ' +
   'directory/review/editorial source (source)? Use "unsure" only if truly unclear.\n' +
+  '- Also list brands_named: the product/brand names ChatGPT NAMES IN THE PROSE as ' +
+  'answers or recommendations (the actual recommended products, e.g. "Acme Tracker"). ' +
+  'EXCLUDE the audited brand itself, and EXCLUDE publishers/review sites/aggregators/' +
+  'sources (those belong in citation_judgments, not here). Names exactly as written.\n' +
   'Return ONLY valid JSON, no markdown: ' +
   '{"suggestion_action": string, "citation_judgments": [{"domain": string, "role": ' +
-  '"competitor"|"source"|"unsure"}]}';
+  '"competitor"|"source"|"unsure"}], "brands_named": [string]}';
 
 /**
  * Positioning-aware per-query suggestion + per-citation role judgments —
@@ -180,7 +184,7 @@ export async function generateQuerySuggestion(
     brandPosition: number | null;
   },
   env: Env
-): Promise<{ action: string; judgments: CitationRole[] } | null> {
+): Promise<{ action: string; judgments: CitationRole[]; brandsNamed: string[] } | null> {
   if (!env.OPENAI_API_KEY) return null;
 
   const cited = input.citations.map((c) => ({
@@ -217,6 +221,7 @@ export async function generateQuerySuggestion(
     const parsed = JSON.parse(content) as {
       suggestion_action?: unknown;
       citation_judgments?: unknown;
+      brands_named?: unknown;
     };
     const action =
       typeof parsed.suggestion_action === 'string'
@@ -235,7 +240,18 @@ export async function generateQuerySuggestion(
           .map((j) => ({ domain: j.domain as string, role: j.role as CitationRole['role'] }))
       : [];
 
-    return { action, judgments };
+    const brandsNamed: string[] = Array.isArray(parsed.brands_named)
+      ? Array.from(
+          new Set(
+            (parsed.brands_named as unknown[])
+              .filter((b): b is string => typeof b === 'string')
+              .map((b) => b.trim())
+              .filter(Boolean)
+          )
+        )
+      : [];
+
+    return { action, judgments, brandsNamed };
   } catch (err: any) {
     console.error('[suggestion] failed:', err?.message);
     return null;

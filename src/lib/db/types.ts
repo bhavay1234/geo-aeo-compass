@@ -189,6 +189,10 @@ export interface PollResult {
   raw_citations: InlineCitation[];
   discovered_in_query: DiscoveredInQuery[];
   citation_roles: CitationRole[];
+  /** Brands/products ChatGPT NAMED in the prose as answers/recommendations
+   *  (LLM-extracted, excl. the audited brand). The competitor signal — distinct
+   *  from cited source domains. */
+  brands_named: string[];
   suggestion: Suggestion | null;
   created_at: string;
 }

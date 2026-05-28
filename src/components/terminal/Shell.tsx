@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "./workspace-context";
 import { useTheme } from "./useTheme";
+import { allCompetitorBrands } from "./derive";
 import type { Audit } from "@/lib/db/types";
 
 const TABS = [
@@ -139,10 +140,7 @@ export function TabNav() {
 
   const counts: Record<string, number> = {
     queries: polls.length,
-    competitors:
-      (audit?.competitors?.length ?? 0) +
-      (audit?.discovered_competitors?.filter((d) => d.label === "competitor")
-        .length ?? 0),
+    competitors: audit ? allCompetitorBrands(audit, polls).length : 0,
     actions: polls.filter(
       (p) => p.suggestion && p.suggestion.situation !== "winning"
     ).length,

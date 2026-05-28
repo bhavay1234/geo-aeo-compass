@@ -212,8 +212,8 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
       {/* Share of voice */}
       <div className="tm-panel tm-reveal" style={{ animationDelay: ".05s" }}>
         <div className="tm-phead">
-          <h2>◫ Share of voice</h2>
-          <span className="meta">citation share · this run</span>
+          <h2>◫ Share of recommendations</h2>
+          <span className="meta">brands named · this run</span>
         </div>
         <div className="tm-sov">
           <div
@@ -233,7 +233,7 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
             )}
             {leader && (
               <>
-                <span style={{ color: "var(--ink-3)" }}>Citation leader</span>{" "}
+                <span style={{ color: "var(--ink-3)" }}>Most recommended</span>{" "}
                 <b style={{ color: leader.isYou ? "var(--you)" : "var(--ink)" }}>
                   {leader.name}
                 </b>{" "}
