@@ -7,6 +7,7 @@ import {
   computeSummary,
   computeInsights,
   computeDiscoveredCompetitors,
+  attachDiscoveredToQueries,
   buildInsightHeadline,
 } from './orchestrator';
 import type { Citation, InlineCitation } from '../db/types';
@@ -214,6 +215,24 @@ export async function processQueueBatch(
         completed_at: new Date().toISOString(),
       })
       .eq('id', auditId);
+
+    // Parts B & C — pure reuse of the audit-level classification above
+    // (ZERO new LLM calls): backfill per-query discovered competitors and
+    // enrich suggestions for rows where a discovered competitor appeared.
+    const rowsUpdated = await attachDiscoveredToQueries(
+      auditId,
+      discoveredCompetitors,
+      env
+    );
+    console.log(
+      '[discovered-per-query]',
+      'backfilled',
+      rowsUpdated,
+      'rows;',
+      insights.discovered_competitor_count,
+      'competitors labeled for audit',
+      auditId
+    );
 
     console.log(
       `[queue] audit ${auditId} COMPLETED, score: ${visibilityScore}`

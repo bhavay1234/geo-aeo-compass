@@ -14,6 +14,7 @@ import type {
   SuggestionSituation,
   CompetitorCitation,
   DiscoveredCompetitor,
+  DiscoveredInQuery,
 } from '../db/types';
 
 const BATCH_SIZE = 3;
@@ -385,6 +386,7 @@ export async function computeDiscoveredCompetitors(
       citation_count: number;
       queries: Set<string>;
       sample_url: string;
+      sample_title: string;
     }
   >();
 
@@ -394,6 +396,8 @@ export async function computeDiscoveredCompetitors(
       if (existing) {
         existing.citation_count++;
         existing.queries.add(row.query_text);
+        // Capture a non-empty title if we don't have one yet — strong signal.
+        if (!existing.sample_title && c.title) existing.sample_title = c.title;
       } else {
         domainStats.set(c.domain, {
           domain: c.domain,
@@ -401,6 +405,7 @@ export async function computeDiscoveredCompetitors(
           citation_count: 1,
           queries: new Set([row.query_text]),
           sample_url: c.url,
+          sample_title: c.title || '',
         });
       }
     }
@@ -434,20 +439,31 @@ export async function computeDiscoveredCompetitors(
     return [];
   }
 
+  // Feed the single call richer signal: page title + up to 2 buyer queries
+  // the domain was cited for. Still ONE gpt-4o-mini call for all top domains.
   const labels = await classifyDiscoveredDomains(
-    top.map((t) => ({ domain: t.domain, sample_url: t.sample_url })),
+    top.map((t) => ({
+      domain: t.domain,
+      sample_url: t.sample_url,
+      sample_title: t.sample_title,
+      example_queries: Array.from(t.queries).slice(0, 2),
+    })),
     brandName,
     category,
     env
   );
 
-  const discovered: DiscoveredCompetitor[] = top.map((t) => ({
-    domain: t.domain,
-    citation_count: t.citation_count,
-    queries_seen_in: t.queries.size,
-    label: labels[t.domain] ?? 'other',
-    sample_url: t.sample_url,
-  }));
+  const discovered: DiscoveredCompetitor[] = top.map((t) => {
+    const labeled = labels[t.domain] ?? { label: 'other', confidence: 'low' };
+    return {
+      domain: t.domain,
+      citation_count: t.citation_count,
+      queries_seen_in: t.queries.size,
+      label: labeled.label,
+      confidence: labeled.confidence,
+      sample_url: t.sample_url,
+    };
+  });
 
   const labeledCompetitors = discovered.filter((d) => d.label === 'competitor').length;
   console.log(
@@ -460,6 +476,87 @@ export async function computeDiscoveredCompetitors(
   );
 
   return discovered;
+}
+
+const DISCOVERED_CLAUSE_MARKER = 'Discovered players winning this query:';
+
+type DiscoveredAttachRow = {
+  id: string;
+  citations: Citation[] | null;
+  suggestion: Suggestion | null;
+};
+
+/**
+ * Reuses the audit-level discovered_competitors classification (no new LLM
+ * calls) to backfill each poll_result with the discovered domains that
+ * appeared in THAT query, and to append a short clause to suggestions where
+ * a discovered competitor showed up. Pure map lookup. Returns rows updated.
+ */
+export async function attachDiscoveredToQueries(
+  auditId: string,
+  discovered: DiscoveredCompetitor[],
+  env: Env
+): Promise<number> {
+  const supabase = getSupabaseAdmin(env);
+
+  const lookup = new Map<string, { label: DiscoveredCompetitor['label']; confidence: DiscoveredCompetitor['confidence'] }>();
+  for (const d of discovered) {
+    lookup.set(d.domain, { label: d.label, confidence: d.confidence });
+  }
+  if (lookup.size === 0) return 0;
+
+  const { data: polls } = await supabase
+    .from('poll_results')
+    .select('id, citations, suggestion')
+    .eq('audit_id', auditId);
+
+  const rows = (polls as DiscoveredAttachRow[]) || [];
+  let rowsUpdated = 0;
+
+  for (const row of rows) {
+    const seen = new Set<string>();
+    const discoveredInQuery: DiscoveredInQuery[] = [];
+    for (const c of row.citations || []) {
+      const hit = lookup.get(c.domain);
+      if (hit && !seen.has(c.domain)) {
+        seen.add(c.domain);
+        discoveredInQuery.push({
+          domain: c.domain,
+          label: hit.label,
+          confidence: hit.confidence,
+          source_type: c.source_type,
+        });
+      }
+    }
+
+    if (discoveredInQuery.length === 0) continue;
+
+    // Part C: append a clause naming competitor-labeled discovered players.
+    let suggestion = row.suggestion;
+    const competitorDomains = discoveredInQuery
+      .filter((d) => d.label === 'competitor')
+      .map((d) => d.domain);
+    if (
+      suggestion &&
+      competitorDomains.length > 0 &&
+      !suggestion.action.includes(DISCOVERED_CLAUSE_MARKER)
+    ) {
+      suggestion = {
+        ...suggestion,
+        action: `${suggestion.action} ${DISCOVERED_CLAUSE_MARKER} ${competitorDomains.join(
+          ', '
+        )} — competitors you didn't name.`,
+      };
+    }
+
+    await supabase
+      .from('poll_results')
+      .update({ discovered_in_query: discoveredInQuery, suggestion })
+      .eq('id', row.id);
+    rowsUpdated++;
+  }
+
+  return rowsUpdated;
 }
 
 /**

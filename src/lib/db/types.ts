@@ -77,13 +77,25 @@ export interface Suggestion {
 /** Best-guess role of a domain ChatGPT cited that the user didn't name. */
 export type DiscoveredLabel = 'competitor' | 'aggregator' | 'editorial' | 'other';
 
+/** Classifier's confidence in a discovered-domain label. */
+export type Confidence = 'high' | 'medium' | 'low';
+
 /** An unnamed brand/domain ChatGPT repeatedly cites — a competitor the user may not know about. */
 export interface DiscoveredCompetitor {
   domain: string;
   citation_count: number;
   queries_seen_in: number;
   label: DiscoveredLabel;
+  confidence: Confidence;
   sample_url: string;
+}
+
+/** Per-query subset of discovered competitors that appeared in one answer. */
+export interface DiscoveredInQuery {
+  domain: string;
+  label: DiscoveredLabel;
+  confidence: Confidence;
+  source_type: SourceType;
 }
 
 /** Aggregate rollup computed at audit completion (audits.insights). */
@@ -147,6 +159,7 @@ export interface PollResult {
   competitors_mentioned_uncited: string[];
   citations: Citation[];
   raw_citations: InlineCitation[];
+  discovered_in_query: DiscoveredInQuery[];
   suggestion: Suggestion | null;
   created_at: string;
 }
