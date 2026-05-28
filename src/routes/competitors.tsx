@@ -4,9 +4,11 @@ import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
 import { SourceTag } from "@/components/terminal/primitives";
 import {
   buildCompetitorProfiles,
+  influenceRollup,
   type CompetitorProfile,
+  type InfluenceRollup,
 } from "@/components/terminal/derive";
-import type { Audit, PollResult } from "@/lib/db/types";
+import type { Audit, PollResult, DecisiveFactor } from "@/lib/db/types";
 
 export const Route = createFileRoute("/competitors")({
   head: () => ({ meta: [{ title: "Competitors — Compass" }] }),
@@ -34,6 +36,12 @@ const TIER_CLASS: Record<1 | 2 | 3, string> = {
   3: "tm-t3",
 };
 
+const DECISIVE_LABEL: Record<DecisiveFactor, string> = {
+  citations: "presence in cited review-directories & listicles",
+  third_party: "broad third-party presence",
+  own_site: "its own dedicated pages",
+};
+
 function CompetitorsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const profiles = buildCompetitorProfiles(audit, polls);
   const sovMax = Math.max(1, ...profiles.map((p) => p.sovPct));
@@ -47,7 +55,13 @@ function CompetitorsView({ audit, polls }: { audit: Audit; polls: PollResult[] }
       </div>
       <div className="tm-rows">
         {profiles.map((p, i) => (
-          <ProfileCard key={p.name} p={p} rank={i} sovMax={sovMax} />
+          <ProfileCard
+            key={p.name}
+            p={p}
+            rank={i}
+            sovMax={sovMax}
+            rollup={p.isYou ? null : influenceRollup(polls, p.name)}
+          />
         ))}
       </div>
     </div>
@@ -58,10 +72,12 @@ function ProfileCard({
   p,
   rank,
   sovMax,
+  rollup,
 }: {
   p: CompetitorProfile;
   rank: number;
   sovMax: number;
+  rollup: InfluenceRollup | null;
 }) {
   return (
     <div
@@ -133,6 +149,21 @@ function ProfileCard({
           }}
         />
       </div>
+
+      {/* Why it's named — audit-wide influence roll-up */}
+      {rollup && (
+        <div className="tm-insight" style={{ marginTop: 14, padding: 0 }}>
+          <div className="k">⚑ Why it's named</div>
+          <p>
+            {p.name} is named in <b>{rollup.queriesNamed}/{rollup.totalQueries}</b>{" "}
+            queries — driven mainly by <b>{DECISIVE_LABEL[rollup.dominant]}</b>
+            {rollup.topSources.length > 0 && (
+              <> ({rollup.topSources.slice(0, 3).join(", ")})</>
+            )}
+            . You appear in <b>{rollup.youInSourcesCount}</b> of those sources.
+          </p>
+        </div>
+      )}
 
       {/* Verdict — the headline unit */}
       <div style={{ marginTop: 14 }}>

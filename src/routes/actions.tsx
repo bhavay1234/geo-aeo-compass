@@ -52,55 +52,52 @@ interface Action {
   severity: Suggestion["severity"];
 }
 
-function pageLabel(t: "dedicated" | "blog" | "other"): string {
-  return t === "blog" ? "blog post" : t === "dedicated" ? "dedicated page" : "general page";
-}
-
 /**
- * Precise action + effort derived from OUR own page vs what the cited
- * competitors have (Part 4). Returns null until citation analysis has run, so
- * the caller falls back to the deterministic LLM suggestion.
+ * Action + effort inherited from the influence analysis. The decisive factor is
+ * usually CITATIONS, so the action is "get listed where ChatGPT sourced this",
+ * not "make content". Returns null until citation analysis has run (→ caller
+ * falls back to the deterministic suggestion).
  */
 function refineAction(p: PollResult, query: string): { title: string; effort: number } | null {
-  const own = p.own_page;
-  if (!own) return null;
+  const you = p.own_page;
   const comps = p.why_cited ?? [];
-  const compHasSchema = comps.some((c) => c.factors.schema_richness.length > 0);
-  const compDeep = comps.some((c) => c.factors.content_depth >= 800);
-  const compDedicated = comps.some((c) => c.factors.page_type === "dedicated");
+  if (!you || comps.length === 0) return null;
 
-  if (!own.exists) {
-    const wants: string[] = [];
-    if (compDedicated) wants.push("dedicated pages");
-    if (compDeep) wants.push("in-depth content");
-    if (compHasSchema) wants.push("FAQPage/Organization schema");
-    const tail = wants.length ? ` Competitors win here with ${wants.join(", ")}.` : "";
-    return { title: `Build a dedicated page targeting “${query}”.${tail}`, effort: 4 };
+  // Cited sources that name competitors but NOT us → the get-listed worklist.
+  const youUrls = new Set(you.named_in_sources.map((s) => s.url));
+  const gaps = new Map<string, string>(); // domain -> source_type
+  for (const c of comps)
+    for (const s of c.named_in_sources)
+      if (!youUrls.has(s.url)) gaps.set(s.domain, s.source_type);
+
+  // Dominant decisive factor across the named competitors.
+  const tally: Record<string, number> = {};
+  for (const c of comps) tally[c.decisive] = (tally[c.decisive] ?? 0) + 1;
+  const decisive = Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "citations";
+
+  if (decisive === "own_site") {
+    return you.own_page?.exists
+      ? {
+          title: `Upgrade your page for “${query}” — competitors win on a dedicated, schema-rich page.`,
+          effort: 3,
+        }
+      : { title: `Build a dedicated page targeting “${query}”.`, effort: 4 };
   }
 
-  const gaps: string[] = [];
-  let effort = 1;
-  if (own.page_type !== "dedicated" && compDedicated) {
-    gaps.push(`it's a ${pageLabel(own.page_type)}`);
-    effort++;
+  if (gaps.size === 0) {
+    return {
+      title: `Strengthen third-party presence (G2/Gartner/"best-of" lists) for “${query}”.`,
+      effort: 3,
+    };
   }
-  if (compHasSchema && own.schema_types.length === 0) {
-    gaps.push("has no schema");
-    effort++;
-  }
-  if (compDeep && own.word_count < 800) {
-    gaps.push("is thin on content");
-    effort++;
-  }
-  if (!own.on_page_targeting) {
-    gaps.push("doesn't target the query in its title");
-    effort++;
-  }
-  const url = own.url ? own.url.replace(/^https?:\/\//, "") : "a page";
-  const gapText = gaps.length ? ` but ${gaps.join(", ")}` : "";
+
+  const domains = Array.from(gaps.keys());
+  const list = domains.slice(0, 3).join(", ");
+  const more = domains.length > 3 ? ` +${domains.length - 3} more` : "";
+  const effort = Math.min(5, Math.max(2, Math.ceil(domains.length / 1.5)));
   return {
-    title: `You have ${url}${gapText} — upgrade it to win “${query}”.`,
-    effort: Math.min(5, Math.max(1, effort)),
+    title: `Get listed where ChatGPT sourced this — ${list}${more} name competitors but not you.`,
+    effort,
   };
 }
 

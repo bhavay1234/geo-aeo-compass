@@ -151,32 +151,56 @@ export interface CitationAnalysisEntry {
   match_type: "name" | "domain" | "none";
 }
 
-/** Factor scores behind a deterministic "why cited" verdict. */
-export interface WhyFactors {
-  on_page_targeting: boolean; // query terms in title/H1
-  content_depth: number; // word count
-  schema_richness: string[]; // schema types present
-  page_type: PageType;
-  domain_freq: number; // # queries this domain is cited across (authority proxy)
-}
+/** Which of the three influence factors most likely drove a naming. */
+export type DecisiveFactor = "citations" | "third_party" | "own_site";
 
-/** "Why is this source cited" for one cited vendor URL in one query. */
-export interface WhyCited {
-  brand: string;
+/** A cited source that named a brand (Factor-1 evidence trail). */
+export interface InfluenceSource {
   url: string;
   domain: string;
-  factors: WhyFactors;
-  verdict: string; // deterministic, template-built — no LLM
+  source_type: SourceType;
 }
 
-/** The target's most-relevant existing page for a query (Part 4 / Actionables). */
-export interface OwnPage {
+/** Normalized 0..1 influence factor scores (citations weighted highest). */
+export interface InfluenceFactors {
+  cited: number; // share of THIS query's cited sources that name the brand
+  third_party: number; // presence across the audit's cited sources (authority)
+  own_site: number; // dedicated page / schema strength (weighted least)
+}
+
+/** A target's most-relevant page signals (Factor 3 detail). */
+export interface PageRef {
   exists: boolean;
   url: string | null;
   page_type: PageType;
   schema_types: string[];
-  word_count: number;
-  on_page_targeting: boolean;
+}
+
+/**
+ * Why ChatGPT NAMED brand X as a recommendation in one query — led by which
+ * cited sources name it (Factor 1), then cross-audit third-party presence
+ * (Factor 2), then own-site signals (Factor 3, least). Verdict is one cheap
+ * LLM call over the factor summary (deterministic fallback on failure).
+ */
+export interface WhyNamed {
+  brand: string;
+  decisive: DecisiveFactor;
+  factors: InfluenceFactors;
+  named_in_sources: InfluenceSource[]; // cited sources (this query) that name the brand
+  cited_total: number; // # analyzable cited sources this query
+  third_party_count: number; // # distinct cited sources across the audit naming it
+  own_page: PageRef | null;
+  verdict: string;
+}
+
+/** The TARGET brand's influence on the SAME query — powers "why not you" + the
+ *  YOU comparison bars. Stored in poll_results.own_page (jsonb). */
+export interface YouInfluence {
+  factors: InfluenceFactors;
+  named_in_sources: InfluenceSource[];
+  cited_total: number;
+  third_party_count: number;
+  own_page: PageRef | null;
 }
 
 /** Aggregate rollup computed at audit completion (audits.insights). */
@@ -251,8 +275,10 @@ export interface PollResult {
    *  (LLM-extracted, excl. the audited brand). The competitor signal — distinct
    *  from cited source domains. */
   brands_named: string[];
-  why_cited: WhyCited[];
-  own_page: OwnPage | null;
+  /** Per named-brand "why named" influence analysis (Factor 1-3 + verdict). */
+  why_cited: WhyNamed[];
+  /** The target brand's own influence on this query (jsonb col is "own_page"). */
+  own_page: YouInfluence | null;
   suggestion: Suggestion | null;
   created_at: string;
 }

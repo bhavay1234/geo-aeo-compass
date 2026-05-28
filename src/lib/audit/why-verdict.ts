@@ -1,74 +1,77 @@
-import type { WhyFactors, OwnPage, PageType } from '../db/types';
+import type {
+  InfluenceFactors,
+  InfluenceSource,
+  DecisiveFactor,
+  PageRef,
+} from '../db/types';
 
-/** Schema @types worth surfacing in the verdict (skip noise like WebSite/BreadcrumbList). */
-const MEANINGFUL_SCHEMA = new Set([
-  'Organization',
-  'Product',
-  'FAQPage',
-  'Review',
-  'AggregateRating',
-  'Article',
-  'SoftwareApplication',
-  'HowTo',
-]);
+// Citations weighted highest, own-site least (for best-software queries).
+const WEIGHT: Record<DecisiveFactor, number> = {
+  citations: 3,
+  third_party: 2,
+  own_site: 1,
+};
 
-function humanList(items: string[]): string {
-  const xs = items.slice(0, 3);
-  if (xs.length <= 1) return xs[0] ?? '';
-  if (xs.length === 2) return `${xs[0]} and ${xs[1]}`;
-  return `${xs[0]}, ${xs[1]} and ${xs[2]}`;
+/** Single most-decisive factor by weighted score (citations win ties). */
+export function decisiveFactor(f: InfluenceFactors): DecisiveFactor {
+  const ranked: [DecisiveFactor, number][] = [
+    ['citations', f.cited * WEIGHT.citations],
+    ['third_party', f.third_party * WEIGHT.third_party],
+    ['own_site', f.own_site * WEIGHT.own_site],
+  ];
+  ranked.sort((a, b) => b[1] - a[1]);
+  return ranked[0][1] > 0 ? ranked[0][0] : 'third_party';
 }
 
-function shortUrl(url: string): string {
-  return url.replace(/^https?:\/\//, '').replace(/\/$/, '');
+function sourceList(sources: InfluenceSource[]): string {
+  const ds = sources.slice(0, 2).map((s) => s.domain);
+  if (ds.length === 0) return '';
+  return ds.join(' and ') + (sources.length > 2 ? ` +${sources.length - 2} more` : '');
 }
 
-function pageNoun(t: PageType): string {
-  return t === 'dedicated' ? 'a dedicated page' : t === 'blog' ? 'an in-depth article' : 'a relevant page';
-}
-
-function pageLabel(t: PageType): string {
-  return t === 'dedicated' ? 'dedicated page' : t === 'blog' ? 'blog post' : 'general page';
+export interface InfluenceSide {
+  factors: InfluenceFactors;
+  named_in_sources: InfluenceSource[];
+  cited_total: number;
+  third_party_count: number;
+  own_page: PageRef | null;
 }
 
 /**
- * Deterministic, template-built "why is this source cited" verdict — NO LLM.
- * Factors → sentence, plus an honest contrast against the target's own page.
+ * Deterministic fallback verdict (used only if the cheap LLM call fails). Leads
+ * with the citation evidence, names the decisive factor, then "why not you".
+ * "Likely/primarily" framing — correlated with citation, not proof of ranking.
  */
-export function buildWhyVerdict(
-  domain: string,
-  factors: WhyFactors,
-  own: OwnPage | null
-): string {
-  const schema = factors.schema_richness.filter((s) => MEANINGFUL_SCHEMA.has(s));
+export function buildInfluenceFallback(args: {
+  brand: string;
+  you: string;
+  x: InfluenceSide;
+  me: InfluenceSide;
+}): string {
+  const { brand, you, x, me } = args;
+  const dec = decisiveFactor(x.factors);
 
-  // Lead clause: page type (+ depth) (+ schema).
-  let lead = `it has ${pageNoun(factors.page_type)}`;
-  if (factors.content_depth >= 800) lead += ` (${factors.content_depth.toLocaleString()} words)`;
-  if (schema.length) lead += ` with ${humanList(schema)} schema`;
-
-  const extra: string[] = [];
-  if (factors.on_page_targeting) extra.push('the query terms appear in its title/H1');
-  if (factors.domain_freq >= 3)
-    extra.push(`it's one of the most-cited sources across your queries (${factors.domain_freq})`);
-
-  let verdict = `${domain} is cited here because ${lead}`;
-  if (extra.length) verdict += ` — ${extra.join(', and ')}`;
-  verdict += '.';
-
-  // Honest contrast with the target's own page for this query.
-  if (own) {
-    if (!own.exists) {
-      verdict += ' You have no dedicated page targeting this query yet.';
-    } else {
-      const bits: string[] = [`is a ${pageLabel(own.page_type)}`];
-      const ownSchema = own.schema_types.filter((s) => MEANINGFUL_SCHEMA.has(s));
-      bits.push(ownSchema.length ? `with ${humanList(ownSchema)} schema` : 'no schema');
-      if (!own.on_page_targeting) bits.push('query terms absent from its title');
-      const where = own.url ? ` (${shortUrl(own.url)})` : '';
-      verdict += ` Your closest page${where} ${bits.join(', ')}.`;
-    }
+  let lead: string;
+  if (dec === 'citations') {
+    lead = `${brand} was likely named primarily because ${x.named_in_sources.length} of the ${x.cited_total} cited source${x.cited_total === 1 ? '' : 's'} name it`;
+    const sl = sourceList(x.named_in_sources);
+    lead += sl ? ` (incl. ${sl}).` : '.';
+  } else if (dec === 'third_party') {
+    lead = `${brand} was likely named on the strength of its presence across ${x.third_party_count} third-party source${x.third_party_count === 1 ? '' : 's'} cited elsewhere in this audit.`;
+  } else {
+    lead = `${brand} was likely named partly on its own-site signals${x.own_page?.schema_types.length ? ' (a dedicated page with schema)' : ''}.`;
   }
 
-  return verdict;
+  let not: string;
+  if (me.named_in_sources.length === 0) {
+    not = ` ${you} wasn't named — it appears in 0 of the ${x.cited_total} cited sources for this query`;
+    not += x.named_in_sources.length
+      ? `, and is absent from the ${sourceList(x.named_in_sources)} pages ChatGPT pulled from.`
+      : '.';
+    not += ' Closest gap: get listed in the review/listicle sources driving this answer.';
+  } else {
+    not = ` ${you} appears in ${me.named_in_sources.length} of the cited sources but still wasn't named as a top pick — strengthen presence in the highest-authority ones.`;
+  }
+
+  return lead + not;
 }

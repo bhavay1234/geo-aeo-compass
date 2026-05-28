@@ -1,34 +1,37 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, type Env } from '../db/supabase';
-import { normalizeDomain } from './source-classifier';
+import { normalizeDomain, competitorToDomain } from './source-classifier';
 import {
   fetchPageSignals,
   brandPresence,
-  queryInTitleOrH1,
   significantTerms,
   type ExtractedPage,
 } from './page-fetch';
 import { cheerioScrape, crawlOwnSite, type CrawledPage } from './apify';
-import { buildWhyVerdict } from './why-verdict';
-import { mapWithConcurrency } from '../llm/suggestions';
+import { decisiveFactor, buildInfluenceFallback, type InfluenceSide } from './why-verdict';
+import { mapWithConcurrency, inferInfluenceVerdict } from '../llm/suggestions';
 import type {
   Citation,
   CitationRole,
   CitationAnalysisEntry,
   PageSignals,
-  WhyCited,
-  WhyFactors,
-  OwnPage,
+  PageRef,
+  InfluenceSource,
+  InfluenceFactors,
+  WhyNamed,
+  YouInfluence,
 } from '../db/types';
 
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-const WHY_TOP_N = 3; // top-3 vendor/competitor pages per query (Apify cap)
+const TOP_BRANDS_PER_QUERY = 3; // Apify/LLM cap → ~24 verdict calls/audit
 
 type PollRow = {
   id: string;
   query_text: string;
   citations: Citation[] | null;
   citation_roles: CitationRole[] | null;
+  competitors_cited: { name: string }[] | null;
+  brands_named: string[] | null;
 };
 
 interface CachedPage {
@@ -37,22 +40,15 @@ interface CachedPage {
   fetched_at: number;
 }
 
-function brandFromDomain(domain: string): string {
-  const core = normalizeDomain(domain).split('.')[0] || domain;
-  return core ? core.charAt(0).toUpperCase() + core.slice(1) : domain;
-}
+// ── caching ──────────────────────────────────────────────────────────────
 
-/** Read citation_pages rows for the given urls → fresh (within TTL) cache map. */
 async function loadCache(
   supabase: SupabaseClient,
   urls: string[]
 ): Promise<Map<string, CachedPage>> {
   const out = new Map<string, CachedPage>();
   if (urls.length === 0) return out;
-  const { data } = await supabase
-    .from('citation_pages')
-    .select('*')
-    .in('url', urls);
+  const { data } = await supabase.from('citation_pages').select('*').in('url', urls);
   for (const r of (data as any[]) || []) {
     const fetchedAt = r.fetched_at ? new Date(r.fetched_at).getTime() : 0;
     if (Date.now() - fetchedAt > CACHE_TTL_MS) continue;
@@ -77,10 +73,7 @@ async function loadCache(
   return out;
 }
 
-async function upsertCache(
-  supabase: SupabaseClient,
-  pages: ExtractedPage[]
-): Promise<void> {
+async function upsertCache(supabase: SupabaseClient, pages: ExtractedPage[]): Promise<void> {
   if (pages.length === 0) return;
   const rows = pages.map((p) => ({
     url: p.signals.url,
@@ -100,16 +93,13 @@ async function upsertCache(
   await supabase.from('citation_pages').upsert(rows, { onConflict: 'url' });
 }
 
-/**
- * Resolve signals for a set of URLs: fresh cache → plain fetch → ONE batched
- * cheerio fallback for the ones plain fetch couldn't read. Upserts new results.
- */
+/** Fresh cache → plain fetch → ONE batched cheerio fallback for failures. */
 async function resolveSignals(
   supabase: SupabaseClient,
   urls: string[],
   env: Env
 ): Promise<Map<string, CachedPage>> {
-  const unique = Array.from(new Set(urls));
+  const unique = Array.from(new Set(urls.filter(Boolean)));
   const cache = await loadCache(supabase, unique);
   const missing = unique.filter((u) => !cache.has(u));
 
@@ -118,7 +108,6 @@ async function resolveSignals(
   const failed: string[] = [];
   fetched.forEach((r, i) => (r ? ok.push(r) : failed.push(missing[i])));
 
-  // Fallback only on failure — one batched Apify cheerio run for blocked pages.
   let recovered: ExtractedPage[] = [];
   if (failed.length > 0 && env.APIFY_TOKEN) {
     try {
@@ -130,59 +119,84 @@ async function resolveSignals(
 
   const all = [...ok, ...recovered];
   await upsertCache(supabase, all);
-  for (const p of all) {
+  for (const p of all)
     cache.set(p.signals.url, {
       signals: p.signals,
       text_sample: p.text_sample,
       fetched_at: Date.now(),
     });
-  }
   return cache;
 }
 
-/** Cited URLs that are vendor/competitor (skip aggregator/editorial/own). */
-function vendorUrls(poll: PollRow, ownNorm: string): string[] {
-  const compDomains = new Set<string>();
-  for (const r of poll.citation_roles ?? [])
-    if (r.role === 'competitor') compDomains.add(normalizeDomain(r.domain));
+// ── helpers ────────────────────────────────────────────────────────────────
+
+function namedBrands(poll: PollRow, ownLower: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const c of poll.citations ?? []) {
-    const d = normalizeDomain(c.domain);
-    if (!d || d === ownNorm || d.endsWith('.' + ownNorm)) continue;
-    const isVendor = c.source_type === 'competitor' || compDomains.has(d);
-    if (!isVendor || seen.has(c.url)) continue;
-    seen.add(c.url);
-    out.push(c.url);
-  }
-  return out.slice(0, WHY_TOP_N);
+  const add = (n: string) => {
+    const t = (n || '').trim();
+    const k = t.toLowerCase();
+    if (t && k !== ownLower && !seen.has(k)) {
+      seen.add(k);
+      out.push(t);
+    }
+  };
+  for (const c of poll.competitors_cited ?? []) add(c.name);
+  for (const b of poll.brands_named ?? []) add(b);
+  return out;
 }
 
-/** Best matching own page for a query among crawled candidates. */
-function bestOwnPage(
-  query: string,
-  candidates: CrawledPage[]
-): CrawledPage | null {
+/** Does this cited page mention the brand (by name or its domain core)? */
+function pageNamesBrand(brand: string, page: CachedPage | undefined): boolean {
+  if (!page) return false;
+  const hay = (page.signals.title + '\n' + page.text_sample).toLowerCase();
+  const name = brand.trim().toLowerCase();
+  if (name.length >= 3 && hay.includes(name)) return true;
+  const core = competitorToDomain(brand).split('.')[0];
+  if (core.length >= 4 && hay.includes(core)) return true;
+  return false;
+}
+
+function ownSiteScore(s?: PageSignals): number {
+  if (!s) return 0;
+  let v = s.page_type === 'dedicated' ? 0.5 : s.page_type === 'blog' ? 0.2 : 0.1;
+  if (s.schema_types.some((t) => ['Organization', 'Product', 'FAQPage', 'SoftwareApplication'].includes(t)))
+    v += 0.5;
+  return Math.min(1, v);
+}
+
+function pageRef(url: string | null, s?: PageSignals): PageRef {
+  return {
+    exists: !!url,
+    url,
+    page_type: s?.page_type ?? 'other',
+    schema_types: s?.schema_types ?? [],
+  };
+}
+
+function bestOwnPage(query: string, candidates: CrawledPage[]): CrawledPage | null {
   const terms = significantTerms(query);
   if (terms.length === 0 || candidates.length === 0) return null;
   let best: CrawledPage | null = null;
-  let bestScore = 0;
+  let score = 0;
   for (const c of candidates) {
     const hay = (c.url + ' ' + c.title + ' ' + c.text).toLowerCase();
-    const score = terms.filter((t) => hay.includes(t)).length;
-    if (score > bestScore) {
-      bestScore = score;
+    const s = terms.filter((t) => hay.includes(t)).length;
+    if (s > score) {
+      score = s;
       best = c;
     }
   }
-  return bestScore > 0 ? best : null;
+  return score > 0 ? best : null;
 }
 
+// ── main ─────────────────────────────────────────────────────────────────
+
 /**
- * Post-finalize citation analysis. Part 1/2 (brand presence + Citations rollup)
- * land fast; Parts 3/4 (why-cited + own-page, Apify) populate after. Each write
- * is isolated so an unmigrated column can't cascade-drop the others. Runs in the
- * dedicated `citations` queue stage — never in the request path.
+ * Post-finalize influence analysis. The question is "ChatGPT NAMED brand X —
+ * what influenced that, and why not you?" — led by which CITED SOURCES name X
+ * (Factor 1), then cross-audit third-party presence (Factor 2), then own-site
+ * (Factor 3, least). Runs in the dedicated citations queue stage.
  */
 export async function analyzeCitations(auditId: string, env: Env): Promise<void> {
   const supabase = getSupabaseAdmin(env);
@@ -193,22 +207,23 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     .eq('id', auditId)
     .single();
   if (!audit) return;
-  const brandName: string = audit.brand_name;
+  const you: string = audit.brand_name;
+  const ownLower = you.trim().toLowerCase();
   const brandDomain: string = audit.domain;
   const ownNorm = normalizeDomain(brandDomain);
 
   const { data: pollData } = await supabase
     .from('poll_results')
-    .select('id, query_text, citations, citation_roles')
+    .select('id, query_text, citations, citation_roles, competitors_cited, brands_named')
     .eq('audit_id', auditId);
   const polls = (pollData as PollRow[]) || [];
 
-  // ── Part 1/2: brand presence across every cited URL + Citations rollup ──
+  // ── Part 1/2: fetch every cited URL, brand presence (us), Citations rollup ──
   const urlMeta = new Map<
     string,
     { domain: string; source_type: Citation['source_type']; queries: Set<string> }
   >();
-  for (const p of polls) {
+  for (const p of polls)
     for (const c of p.citations ?? []) {
       if (!c.url) continue;
       const ex = urlMeta.get(c.url);
@@ -220,19 +235,14 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
           queries: new Set([p.id]),
         });
     }
-  }
   const allUrls = Array.from(urlMeta.keys());
-  const signals = await resolveSignals(supabase, allUrls, env);
+  const pages = await resolveSignals(supabase, allUrls, env);
 
   const analysis: CitationAnalysisEntry[] = allUrls.map((url) => {
     const meta = urlMeta.get(url)!;
-    const page = signals.get(url);
+    const page = pages.get(url);
     const presence = page
-      ? brandPresence(
-          { title: page.signals.title, text_sample: page.text_sample },
-          brandName,
-          brandDomain
-        )
+      ? brandPresence({ title: page.signals.title, text_sample: page.text_sample }, you, brandDomain)
       : { brand_present: false, match_type: 'none' as const };
     return {
       url,
@@ -244,18 +254,38 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     };
   });
   analysis.sort((a, b) => b.query_count - a.query_count);
+  const targetNamedUrls = new Set(analysis.filter((a) => a.brand_present).map((a) => a.url));
 
   await supabase
     .from('audits')
     .update({ citation_analysis: analysis, citation_status: 'analyzing' })
     .eq('id', auditId);
 
-  // domain → # distinct queries it's cited across (authority proxy).
-  const domainFreq = new Map<string, number>();
-  for (const e of analysis)
-    domainFreq.set(e.domain, (domainFreq.get(e.domain) ?? 0) + e.query_count);
+  // Brands we'll analyze (top-N named per query, deduped across the audit).
+  const analyzedBrands = new Map<string, string>(); // lower -> display
+  const topByPoll = new Map<string, string[]>();
+  for (const p of polls) {
+    const top = namedBrands(p, ownLower).slice(0, TOP_BRANDS_PER_QUERY);
+    topByPoll.set(p.id, top);
+    for (const b of top) analyzedBrands.set(b.toLowerCase(), b);
+  }
 
-  // ── Part 4: discover the target's own pages (Apify WCC, cached by domain) ──
+  // Factor 2 index: brand -> distinct cited URLs across the audit naming it.
+  const brandToSources = new Map<string, Set<string>>();
+  for (const [lower, display] of analyzedBrands) {
+    const set = new Set<string>();
+    for (const url of allUrls) if (pageNamesBrand(display, pages.get(url))) set.add(url);
+    brandToSources.set(lower, set);
+  }
+
+  // Factor 3 sources: competitor homepages (plain fetch, cached) + our WCC crawl.
+  const compHomeUrls = Array.from(analyzedBrands.values()).map(
+    (b) => `https://${competitorToDomain(b)}/`
+  );
+  const compHome = await resolveSignals(supabase, compHomeUrls, env);
+  const compSignalByBrand = (b: string): PageSignals | undefined =>
+    compHome.get(`https://${competitorToDomain(b)}/`)?.signals;
+
   let ownCandidates: CrawledPage[] = [];
   if (env.APIFY_TOKEN) {
     try {
@@ -264,71 +294,104 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
       console.error('[citations] own-site crawl failed:', e?.message);
     }
   }
-
-  // Ensure full signals (incl. schema) for the matched own pages + why targets.
   const ownByPoll = new Map<string, CrawledPage | null>();
-  const needSignals = new Set<string>();
+  const ownUrls = new Set<string>();
   for (const p of polls) {
     const own = bestOwnPage(p.query_text, ownCandidates);
     ownByPoll.set(p.id, own);
-    if (own) needSignals.add(own.url);
-    for (const u of vendorUrls(p, ownNorm)) needSignals.add(u);
+    if (own) ownUrls.add(own.url);
   }
-  const sig2 = await resolveSignals(supabase, Array.from(needSignals), env);
+  const ownSig = await resolveSignals(supabase, Array.from(ownUrls), env);
 
-  // ── Part 3: per-query why-cited verdicts + own_page ──
+  const sourcesNaming = (brand: string, urls: string[]): InfluenceSource[] =>
+    urls
+      .filter((u) => pageNamesBrand(brand, pages.get(u)))
+      .map((u) => ({ url: u, domain: urlMeta.get(u)!.domain, source_type: urlMeta.get(u)!.source_type }));
+
+  const tpNorm = (n: number) => Math.min(1, n / 4); // ~4 sources = saturated
+
+  // ── Parts 3 & 4: per query, per top-named brand → factors + LLM verdict ──
   await Promise.allSettled(
     polls.map(async (p) => {
-      const ownC = ownByPoll.get(p.id) ?? null;
-      let ownPage: OwnPage | null = null;
-      if (ownCandidates.length > 0) {
-        if (!ownC) {
-          ownPage = {
-            exists: false,
-            url: null,
-            page_type: 'other',
-            schema_types: [],
-            word_count: 0,
-            on_page_targeting: false,
-          };
-        } else {
-          const s = sig2.get(ownC.url)?.signals;
-          ownPage = {
-            exists: true,
-            url: ownC.url,
-            page_type: s?.page_type ?? 'other',
-            schema_types: s?.schema_types ?? [],
-            word_count: s?.word_count ?? 0,
-            on_page_targeting: s
-              ? queryInTitleOrH1(p.query_text, s.title, s.h1)
-              : false,
-          };
-        }
-      }
+      const citedUrls = (p.citations ?? [])
+        .map((c) => c.url)
+        .filter((u) => u && pages.get(u));
+      const citedTotal = citedUrls.length;
 
-      const why: WhyCited[] = [];
-      for (const url of vendorUrls(p, ownNorm)) {
-        const s = sig2.get(url)?.signals;
-        if (!s) continue;
-        const factors: WhyFactors = {
-          on_page_targeting: queryInTitleOrH1(p.query_text, s.title, s.h1),
-          content_depth: s.word_count,
-          schema_richness: s.schema_types,
-          page_type: s.page_type,
-          domain_freq: domainFreq.get(s.root_domain) ?? 1,
+      // Target ("you") influence on this query — computed once.
+      const ownC = ownByPoll.get(p.id) ?? null;
+      const ownSignals = ownC ? ownSig.get(ownC.url)?.signals : undefined;
+      const youNamed = citedUrls
+        .filter((u) => targetNamedUrls.has(u))
+        .map((u) => ({ url: u, domain: urlMeta.get(u)!.domain, source_type: urlMeta.get(u)!.source_type }));
+      const youTp = targetNamedUrls.size;
+      const youSide: InfluenceSide = {
+        factors: {
+          cited: citedTotal ? youNamed.length / citedTotal : 0,
+          third_party: tpNorm(youTp),
+          own_site: ownCandidates.length ? ownSiteScore(ownSignals) : 0,
+        },
+        named_in_sources: youNamed,
+        cited_total: citedTotal,
+        third_party_count: youTp,
+        own_page: ownCandidates.length ? pageRef(ownC?.url ?? null, ownSignals) : null,
+      };
+      const youInfluence: YouInfluence = { ...youSide };
+
+      const why: WhyNamed[] = [];
+      for (const brand of topByPoll.get(p.id) ?? []) {
+        const named = sourcesNaming(brand, citedUrls);
+        const tpCount = brandToSources.get(brand.toLowerCase())?.size ?? named.length;
+        const xSig = compSignalByBrand(brand);
+        const factors: InfluenceFactors = {
+          cited: citedTotal ? named.length / citedTotal : 0,
+          third_party: tpNorm(tpCount),
+          own_site: ownSiteScore(xSig),
         };
-        why.push({
-          brand: brandFromDomain(s.root_domain),
-          url,
-          domain: s.root_domain,
+        const xSide: InfluenceSide = {
           factors,
-          verdict: buildWhyVerdict(s.root_domain, factors, ownPage),
+          named_in_sources: named,
+          cited_total: citedTotal,
+          third_party_count: tpCount,
+          own_page: pageRef(`https://${competitorToDomain(brand)}/`, xSig),
+        };
+
+        const llm = await inferInfluenceVerdict(
+          {
+            query: p.query_text,
+            you,
+            brand,
+            brand_signals: {
+              named_in_cited_sources: `${named.length} of ${citedTotal}`,
+              cited_source_types: named.map((s) => s.source_type),
+              third_party_sources_across_audit: tpCount,
+              has_dedicated_own_page: xSig?.page_type === 'dedicated',
+              own_page_schema: xSig?.schema_types ?? [],
+            },
+            your_signals: {
+              named_in_cited_sources: `${youNamed.length} of ${citedTotal}`,
+              third_party_sources_across_audit: youTp,
+              has_dedicated_own_page: youSide.own_page?.exists && ownSignals?.page_type === 'dedicated',
+            },
+          },
+          env
+        );
+
+        why.push({
+          brand,
+          decisive: decisiveFactor(factors),
+          factors,
+          named_in_sources: named,
+          cited_total: citedTotal,
+          third_party_count: tpCount,
+          own_page: xSide.own_page,
+          verdict: llm || buildInfluenceFallback({ brand, you, x: xSide, me: youSide }),
         });
       }
 
       await supabase
         .from('poll_results')
-        .update({ why_cited: why, own_page: ownPage })
+        .update({ why_cited: why, own_page: youInfluence })
         .eq('id', p.id);
     })
   );
@@ -336,6 +399,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   await supabase.from('audits').update({ citation_status: 'done' }).eq('id', auditId);
   console.log(
     `[citations] audit ${auditId} — ${analysis.length} sources, ` +
-      `${analysis.filter((a) => a.brand_present).length} with brand present`
+      `${analysis.filter((a) => a.brand_present).length} naming you, ` +
+      `${analyzedBrands.size} brands analyzed`
   );
 }

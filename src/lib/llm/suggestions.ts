@@ -146,6 +146,58 @@ export async function inferBrandVerdict(
   }
 }
 
+const INFLUENCE_SYSTEM =
+  'You explain what likely influenced ChatGPT to NAME a software brand as a ' +
+  'recommendation in a buyer-query answer. You are given a SIGNAL SUMMARY (not ' +
+  'raw HTML) for the named brand X and for the target brand (us): how many of ' +
+  "this query's cited sources name each, the source types, cross-audit presence, " +
+  'and whether each has a dedicated own page. Rules:\n' +
+  '- 2-4 sentences. LEAD with the citation evidence (which/how many cited sources ' +
+  'name X) — that is the strongest signal.\n' +
+  '- Name the SINGLE most decisive factor: citations, third-party presence, or own-site.\n' +
+  '- Then explain why the target was NOT named, concretely (e.g. appears in 0 of the ' +
+  'cited sources; absent from the G2/listicle pages), and the closest gap to close.\n' +
+  '- Use "likely/primarily" framing — these signals correlate with ChatGPT citation, ' +
+  'they are NOT proof of its ranking algorithm. Never claim to know its exact logic.\n' +
+  '- No preamble, no markdown, no bullet points. One short paragraph of plain prose.';
+
+/**
+ * "Why was brand X named (and not you)" — ONE gpt-4o-mini call over the
+ * three-factor signal summary only. Returns '' on failure so the caller can
+ * fall back to the deterministic influence verdict.
+ */
+export async function inferInfluenceVerdict(
+  summary: {
+    query: string;
+    you: string;
+    brand: string;
+    brand_signals: Record<string, unknown>;
+    your_signals: Record<string, unknown>;
+  },
+  env: Env
+): Promise<string> {
+  if (!env.OPENAI_API_KEY) return '';
+  try {
+    const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+    const completion = await withTimeout(
+      openai.chat.completions.create({
+        model: MODEL,
+        temperature: 0.3,
+        max_tokens: 220,
+        messages: [
+          { role: 'system', content: INFLUENCE_SYSTEM },
+          { role: 'user', content: JSON.stringify(summary) },
+        ],
+      }),
+      TIMEOUT_MS
+    );
+    return (completion.choices[0]?.message?.content || '').trim();
+  } catch (err: any) {
+    console.error('[influence] failed:', err?.message);
+    return '';
+  }
+}
+
 const SUGGESTION_SYSTEM =
   'You are an Answer-Engine-Optimization strategist. ChatGPT was asked a buyer ' +
   'query and produced an answer with web citations. Given the brand, its inferred ' +

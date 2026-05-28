@@ -10,12 +10,154 @@ import {
   type QueryState,
 } from "@/components/terminal/derive";
 import { normalizeDomain } from "@/lib/audit/source-classifier";
-import type { Audit, PollResult, Citation } from "@/lib/db/types";
+import type {
+  Audit,
+  PollResult,
+  Citation,
+  WhyNamed,
+  YouInfluence,
+  DecisiveFactor,
+  SourceType,
+} from "@/lib/db/types";
 
 export const Route = createFileRoute("/queries")({
   head: () => ({ meta: [{ title: "Queries — Compass" }] }),
   component: QueriesPage,
 });
+
+const DECISIVE_LABEL: Record<DecisiveFactor, string> = {
+  citations: "Cited sources",
+  third_party: "Third-party presence",
+  own_site: "Own-site signals",
+};
+const SRC_LABEL: Record<SourceType, string> = {
+  review_directory: "review",
+  analyst: "analyst",
+  editorial: "listicle/editorial",
+  competitor: "vendor",
+  own: "owned",
+  other: "source",
+};
+
+function Bar({ val, color, label }: { val: number; color: string; label: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
+      <span className="mono" style={{ fontSize: 9, width: 30, color: "var(--ink-3)" }}>
+        {label}
+      </span>
+      <div style={{ flex: 1, height: 6, background: "var(--grid)", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${Math.round(val * 100)}%`, background: color }} />
+      </div>
+      <span className="mono" style={{ fontSize: 9, width: 30, textAlign: "right", color: "var(--ink-3)" }}>
+        {Math.round(val * 100)}%
+      </span>
+    </div>
+  );
+}
+
+function FactorRow({
+  label,
+  x,
+  you,
+  primary,
+}: {
+  label: string;
+  x: number;
+  you: number;
+  primary?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        padding: primary ? "6px 8px" : "0 0 0 8px",
+        borderLeft: primary ? "2px solid var(--warn)" : "2px solid var(--grid)",
+        background: primary ? "var(--warn-bg)" : "transparent",
+        borderRadius: primary ? 3 : 0,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 9.5,
+          letterSpacing: ".06em",
+          textTransform: "uppercase",
+          color: primary ? "var(--ink)" : "var(--ink-3)",
+          fontWeight: primary ? 800 : 700,
+        }}
+      >
+        {label}
+        {primary && <span style={{ color: "var(--warn)" }}> · primary signal</span>}
+      </div>
+      <Bar val={x} color="var(--ink-2)" label="them" />
+      <Bar val={you} color="var(--you)" label="you" />
+    </div>
+  );
+}
+
+function InfluenceBlock({
+  w,
+  you,
+}: {
+  w: WhyNamed;
+  you: YouInfluence | null;
+}) {
+  const yf = you?.factors ?? { cited: 0, third_party: 0, own_site: 0 };
+  return (
+    <div
+      style={{
+        marginBottom: 18,
+        paddingBottom: 16,
+        borderBottom: "1px solid var(--grid)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <b style={{ fontSize: 14, color: "var(--ink)" }}>{w.brand}</b>
+        <span className="tm-badge" style={{ background: "var(--neg-bg)", color: "var(--neg)" }}>
+          Named as recommended
+        </span>
+        <span className="mono" style={{ fontSize: 10, color: "var(--warn)", fontWeight: 700 }}>
+          decisive: {DECISIVE_LABEL[w.decisive]}
+        </span>
+      </div>
+
+      <FactorRow label="Cited sources" x={w.factors.cited} you={yf.cited} primary />
+      <FactorRow label="Third-party presence" x={w.factors.third_party} you={yf.third_party} />
+      <FactorRow label="Own-site signals" x={w.factors.own_site} you={yf.own_site} />
+
+      <div style={{ marginTop: 10 }}>
+        <div className="lbl" style={{ marginBottom: 4 }}>
+          Cited sources naming {w.brand} · {w.named_in_sources.length} of {w.cited_total}
+        </div>
+        {w.named_in_sources.length === 0 ? (
+          <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+            none of this query's cited sources name it
+          </span>
+        ) : (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {w.named_in_sources.map((s, i) => (
+              <a
+                key={i}
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="tm-chip"
+                style={{ textDecoration: "none" }}
+                title={s.url}
+              >
+                {s.domain}
+                <small style={{ marginLeft: 5, opacity: 0.7 }}>{SRC_LABEL[s.source_type]}</small>
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <p className="nar" style={{ fontSize: 14, lineHeight: 1.5, color: "var(--ink-2)", marginTop: 10 }}>
+        {w.verdict}
+      </p>
+    </div>
+  );
+}
 
 function QueriesPage() {
   return (
@@ -263,37 +405,19 @@ function QueryRow({
               )}
             </div>
 
-            {/* Why ChatGPT cites the competitor sources here (deterministic). */}
+            {/* Why ChatGPT NAMED these brands — led by which cited sources name them. */}
             {poll.why_cited && poll.why_cited.length > 0 ? (
               <div style={{ marginTop: 20 }}>
-                <div className="lbl">Why these are cited</div>
+                <div className="lbl">Why ChatGPT named these — and not you</div>
                 {poll.why_cited.map((w, i) => (
-                  <div key={i} style={{ marginBottom: 12 }}>
-                    <div
-                      className="mono"
-                      style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)" }}
-                    >
-                      {w.domain}
-                    </div>
-                    <p
-                      className="nar"
-                      style={{
-                        fontSize: 14,
-                        lineHeight: 1.5,
-                        color: "var(--ink-2)",
-                        marginTop: 2,
-                      }}
-                    >
-                      {w.verdict}
-                    </p>
-                  </div>
+                  <InfluenceBlock key={i} w={w} you={poll.own_page} />
                 ))}
               </div>
             ) : analyzing ? (
               <div style={{ marginTop: 20 }}>
-                <div className="lbl">Why these are cited</div>
+                <div className="lbl">Why ChatGPT named these</div>
                 <p className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                  ◴ analyzing on-page signals…
+                  ◴ analyzing influence signals…
                 </p>
               </div>
             ) : null}

@@ -1,4 +1,4 @@
-import type { Audit, PollResult, Citation } from "@/lib/db/types";
+import type { Audit, PollResult, Citation, DecisiveFactor } from "@/lib/db/types";
 import { normalizeDomain, competitorToDomain } from "@/lib/audit/source-classifier";
 
 export type QueryState = "absent" | "weak" | "held";
@@ -80,6 +80,54 @@ export function recommendedBrands(p: PollResult, ownName: string): string[] {
 /** Competitor brands recommended in a query (excl. own) — the gap-row signal. */
 export function whoCited(p: PollResult, ownName: string): string[] {
   return recommendedBrands(p, ownName);
+}
+
+export interface InfluenceRollup {
+  queriesNamed: number;
+  totalQueries: number;
+  dominant: DecisiveFactor;
+  topSources: string[]; // domains most consistently driving the mentions
+  youInSourcesCount: number; // # of those driving source-domains we also appear in
+}
+
+/** Audit-wide influence summary for one competitor brand (Competitors tab). */
+export function influenceRollup(
+  polls: PollResult[],
+  brandName: string
+): InfluenceRollup | null {
+  const bl = brandName.toLowerCase();
+  let queriesNamed = 0;
+  const factorTally: Record<string, number> = {};
+  const srcCount = new Map<string, number>();
+  const compDomains = new Set<string>();
+  const youDomains = new Set<string>();
+  for (const p of polls) {
+    const w = (p.why_cited ?? []).find((x) => x.brand.toLowerCase() === bl);
+    for (const s of p.own_page?.named_in_sources ?? []) youDomains.add(s.domain);
+    if (!w) continue;
+    queriesNamed++;
+    factorTally[w.decisive] = (factorTally[w.decisive] ?? 0) + 1;
+    for (const s of w.named_in_sources) {
+      srcCount.set(s.domain, (srcCount.get(s.domain) ?? 0) + 1);
+      compDomains.add(s.domain);
+    }
+  }
+  if (queriesNamed === 0) return null;
+  const topSources = Array.from(srcCount.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([d]) => d);
+  const dominant = (Object.entries(factorTally).sort((a, b) => b[1] - a[1])[0]?.[0] ??
+    "citations") as DecisiveFactor;
+  let youInSourcesCount = 0;
+  for (const d of compDomains) if (youDomains.has(d)) youInSourcesCount++;
+  return {
+    queriesNamed,
+    totalQueries: polls.length,
+    dominant,
+    topSources,
+    youInSourcesCount,
+  };
 }
 
 /** Unique competitor brands NAMED across the whole run (named + discovered). */
