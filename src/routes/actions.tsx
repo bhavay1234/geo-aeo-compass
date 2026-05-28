@@ -5,7 +5,6 @@ import { Workspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
 import { Meter } from "@/components/terminal/primitives";
 import { queryState, whoCited, type QueryState } from "@/components/terminal/derive";
-import { normalizeDomain } from "@/lib/audit/source-classifier";
 import { updateNotes } from "@/lib/client/api";
 import type { Audit, PollResult, Suggestion } from "@/lib/db/types";
 
@@ -54,13 +53,11 @@ interface Action {
 }
 
 function ActionsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
-  const ownNorm = normalizeDomain(audit.domain);
-
   const actions: Action[] = polls
     .filter((p) => p.suggestion && p.suggestion.situation !== "winning")
     .map((p) => {
       const state = queryState(p);
-      const who = whoCited(p, ownNorm);
+      const who = whoCited(p, audit.brand_name);
       const impact = state === "absent" ? 3 + Math.min(2, who.length) : 2;
       const effort = state === "absent" ? 4 : 2; // building new surface vs strengthening
       return {
