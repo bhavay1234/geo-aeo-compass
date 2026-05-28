@@ -1,5 +1,4 @@
 import { getSupabaseAdmin } from '../db/supabase';
-import { generateQueries } from '../audit/query-bank';
 import { getEnv } from '../server/runtime';
 
 /**
@@ -14,11 +13,11 @@ import { getEnv } from '../server/runtime';
  * Routing is dispatched from src/server.ts before TanStack Start sees the
  * request, so /api/* never enters the createServerFn RPC pipeline.
  *
- * Audit execution (Phase 3.14): /api/audit/start inserts the audit row,
- * enqueues 20 messages (one per query) to AUDIT_QUEUE, and returns. The
- * queue() handler in src/server.ts consumes batches of 3 in parallel —
- * each query gets its own fresh CPU budget, so the free-tier waitUntil
- * kill (Phase 3.13) no longer applies.
+ * Audit execution: /api/audit/start inserts the audit row, enqueues one
+ * message per user-supplied query to AUDIT_QUEUE, and returns. The queue()
+ * handler in src/server.ts consumes batches in parallel — each query gets
+ * its own fresh CPU budget, so the free-tier waitUntil kill (Phase 3.13)
+ * no longer applies. Query count is dynamic (no upper limit).
  */
 export async function handleApiRoute(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -35,6 +34,7 @@ export async function handleApiRoute(request: Request): Promise<Response> {
         domain?: string;
         category?: string;
         competitors?: string[];
+        queries?: string[];
       };
 
       if (!body.brand_name?.trim()) return jsonError(400, 'brand_name is required');
@@ -48,12 +48,19 @@ export async function handleApiRoute(request: Request): Promise<Response> {
         .filter(Boolean)
         .slice(0, 5);
 
-      // Generate queries up-front so we know the exact count for progress_total.
-      const queries = generateQueries(category || 'software', brandName, competitors);
+      // Queries are user-supplied (one per line from the UI). Trim, drop
+      // empties, dedupe exact matches. No upper limit on count.
+      const rawQueries = Array.isArray(body.queries) ? body.queries : [];
+      const cleaned = Array.from(
+        new Set(rawQueries.map((q) => q.trim()).filter((q) => q.length > 0))
+      );
+      if (cleaned.length === 0) {
+        return jsonError(400, 'No valid queries provided');
+      }
 
-      // Insert audit row already in 'running' state — the queue consumer
-      // will start chewing through messages within a couple seconds and the
-      // UI can show progress immediately instead of a pending blip.
+      // Insert audit row already in 'running' state with the dynamic query
+      // count as progress_total — the queue consumer increments progress_done
+      // per message and finalizes when done >= total.
       const { data: audit, error } = await supabase
         .from('audits')
         .insert({
@@ -62,7 +69,7 @@ export async function handleApiRoute(request: Request): Promise<Response> {
           category,
           competitors,
           status: 'running',
-          progress_total: queries.length,
+          progress_total: cleaned.length,
           progress_done: 0,
         })
         .select()
@@ -74,16 +81,15 @@ export async function handleApiRoute(request: Request): Promise<Response> {
 
       const auditId = audit.id as string;
 
-      // Fan out to the queue. Each message is one query; consumer is configured
-      // for batches of 3 with max_concurrency=5 (wrangler.jsonc), so the whole
-      // 20-query audit overlaps in parallel across multiple consumer batches.
+      // Fan out to the queue — one message per cleaned query. Marked
+      // query_category 'user' since these aren't from the generated bank.
       try {
         await Promise.all(
-          queries.map((q, i) =>
+          cleaned.map((q, i) =>
             env.AUDIT_QUEUE.send({
               audit_id: auditId,
-              query_text: q.text,
-              query_category: q.category,
+              query_text: q,
+              query_category: 'user',
               query_index: i,
             })
           )
@@ -100,8 +106,9 @@ export async function handleApiRoute(request: Request): Promise<Response> {
         return jsonError(500, `Failed to enqueue audit: ${enqueueErr?.message || 'unknown'}`);
       }
 
-      return Response.json({ audit_id: auditId });
+      return Response.json({ audit_id: auditId, query_count: cleaned.length });
     }
+
 
     if (path === '/api/audit/status' && method === 'GET') {
       const id = url.searchParams.get('id');
