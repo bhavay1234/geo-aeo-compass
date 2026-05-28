@@ -3,7 +3,7 @@ import type { Env } from '../db/supabase';
 import type { Citation, CitationRole } from '../db/types';
 
 const MODEL = 'gpt-4o-mini';
-const TIMEOUT_MS = 18000;
+const TIMEOUT_MS = 10000;
 
 /** Race a promise against a timeout, clearing the timer on settle. */
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {

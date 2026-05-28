@@ -52,6 +52,21 @@ export function Workspace({
     queryKey: ["audit-result", selectedId],
     queryFn: () => getAuditResult(selectedId as string),
     enabled: !!selectedId,
+    // While the selected audit is still enriching (completed but positioning
+    // not yet written), refetch so discovered tiers / suggestions upgrade live.
+    refetchInterval: (query) => {
+      const a = query.state.data?.audit;
+      if (!a) return false;
+      if (
+        a.status === "completed" &&
+        a.positioning == null &&
+        a.completed_at != null &&
+        Date.now() - new Date(a.completed_at).getTime() < 60_000
+      ) {
+        return 4000;
+      }
+      return false;
+    },
   });
 
   const onSelect = (id: string) =>

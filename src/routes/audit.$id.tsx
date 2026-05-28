@@ -44,6 +44,18 @@ function computeStats(polls: PollResult[]) {
   return { total, cited, avgPosition };
 }
 
+function withinSeconds(iso: string | null, sec: number): boolean {
+  if (!iso) return false;
+  return Date.now() - new Date(iso).getTime() < sec * 1000;
+}
+
+// In-progress states that should keep polling.
+const PENDING_STATUSES = new Set(["pending", "running", "finalizing"]);
+// If a run hasn't reached completion in this long, show partial results.
+const PARTIAL_AFTER_SEC = 90;
+// How long after completion to keep refetching for enrichment to land.
+const ENRICH_WINDOW_SEC = 60;
+
 function AuditDetail() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
@@ -52,17 +64,47 @@ function AuditDetail() {
     queryKey: ["audit-status", id],
     queryFn: () => getAuditStatus(id),
     refetchInterval: (query) => {
-      const s = query.state.data?.status;
-      return s === "running" || s === "pending" ? 2000 : false;
+      const a = query.state.data;
+      if (!a) return false;
+      if (PENDING_STATUSES.has(a.status)) return 2000;
+      // Completed but enrichment (positioning) not yet landed → keep watching.
+      if (
+        a.status === "completed" &&
+        a.positioning == null &&
+        withinSeconds(a.completed_at, ENRICH_WINDOW_SEC)
+      ) {
+        return 4000;
+      }
+      return false;
     },
   });
 
-  const status = statusQuery.data?.status;
+  const audit = statusQuery.data;
+  const status = audit?.status;
+
+  const createdElapsedSec = audit?.created_at
+    ? (Date.now() - new Date(audit.created_at).getTime()) / 1000
+    : 0;
+  const stalled =
+    !!status && PENDING_STATUSES.has(status) && createdElapsedSec >= PARTIAL_AFTER_SEC;
 
   const resultQuery = useQuery({
     queryKey: ["audit-result", id],
     queryFn: () => getAuditResult(id),
-    enabled: status === "completed",
+    enabled: status === "completed" || stalled,
+    refetchInterval: (query) => {
+      const a = query.state.data?.audit;
+      if (!a) return stalled ? 3000 : false;
+      if (PENDING_STATUSES.has(a.status)) return 3000; // partial: keep pulling polls
+      if (
+        a.status === "completed" &&
+        a.positioning == null &&
+        withinSeconds(a.completed_at, ENRICH_WINDOW_SEC)
+      ) {
+        return 4000; // tiers/suggestions upgrade live as enrichment lands
+      }
+      return false;
+    },
   });
 
   const backButton = (
@@ -77,7 +119,6 @@ function AuditDetail() {
     </Button>
   );
 
-  // Initial load
   if (statusQuery.isLoading) {
     return (
       <DashboardShell>
@@ -95,7 +136,7 @@ function AuditDetail() {
     );
   }
 
-  if (statusQuery.isError || !statusQuery.data) {
+  if (statusQuery.isError || !audit) {
     return (
       <DashboardShell>
         {backButton}
@@ -105,8 +146,6 @@ function AuditDetail() {
       </DashboardShell>
     );
   }
-
-  const audit = statusQuery.data;
 
   // Failed
   if (status === "failed") {
@@ -130,30 +169,31 @@ function AuditDetail() {
     );
   }
 
-  // Running / pending — live progress
-  if (status === "running" || status === "pending") {
+  // In progress and not yet stalled → live progress view.
+  if (status && PENDING_STATUSES.has(status) && !stalled) {
     const done = audit.progress_done ?? 0;
     const total = audit.progress_total ?? 0;
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    const scoring = status === "finalizing";
     return (
       <DashboardShell>
         {backButton}
         <div className="rounded-2xl border border-border bg-card p-8">
           <div className="mb-3 flex items-center gap-2 text-sm font-medium text-primary">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Analyzing ChatGPT answers…</span>
+            <span>{scoring ? "Scoring…" : "Analyzing ChatGPT answers…"}</span>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-card-foreground">
             {audit.brand_name}
           </h1>
-          <p className="mt-1 text-muted-foreground">
-            {audit.domain} · ChatGPT
-          </p>
+          <p className="mt-1 text-muted-foreground">{audit.domain} · ChatGPT</p>
 
           <div className="mt-8">
             <div className="mb-2 flex items-end justify-between">
               <span className="text-sm text-muted-foreground">
-                Analyzing {done} of {total} queries…
+                {scoring
+                  ? "Computing your visibility score…"
+                  : `Analyzing ${done} of ${total} queries…`}
               </span>
               <span className="text-2xl font-bold tracking-tight text-card-foreground">
                 {pct}%
@@ -170,7 +210,7 @@ function AuditDetail() {
     );
   }
 
-  // Completed — results
+  // Results: either fully completed, or a partial view after the 90s timeout.
   if (resultQuery.isLoading || !resultQuery.data) {
     return (
       <DashboardShell>
@@ -181,13 +221,17 @@ function AuditDetail() {
   }
 
   const { audit: full, polls } = resultQuery.data;
+  const isPartial = full.status !== "completed";
+  const enriching =
+    full.status === "completed" &&
+    full.positioning == null &&
+    withinSeconds(full.completed_at, ENRICH_WINDOW_SEC);
   const score = full.visibility_score ?? 0;
   const { total, cited, avgPosition } = computeStats(polls);
   const highSeverity = full.insights?.high_severity_count ?? 0;
   const ownDomain = full.domain;
   const namedCompetitors = full.competitors ?? [];
 
-  // Shared per-query rows for both Overview and Query Results tabs.
   const queryRows: QueryTableRow[] = polls.map((p) => ({
     query_text: p.query_text,
     brand_cited: p.brand_cited,
@@ -213,23 +257,44 @@ function AuditDetail() {
               <span>·</span>
               <span>ChatGPT</span>
               <AuditStatusBadge status={full.status} />
+              {enriching && (
+                <span className="flex items-center gap-1 text-xs text-primary">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Refining suggestions…
+                </span>
+              )}
             </div>
             <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
               AI Visibility Score
             </p>
-            {full.summary?.headline && (
-              <p className="mt-3 max-w-2xl text-lg text-card-foreground">
-                {full.summary.headline}
+            {isPartial ? (
+              <p className="mt-3 flex items-center gap-2 text-lg text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Scoring… showing partial results ({polls.length} queries so far).
               </p>
+            ) : (
+              full.summary?.headline && (
+                <p className="mt-3 max-w-2xl text-lg text-card-foreground">
+                  {full.summary.headline}
+                </p>
+              )
             )}
           </div>
           <div className="shrink-0 text-right">
-            <div className="flex items-baseline justify-end gap-1">
-              <span className={`text-6xl font-bold tracking-tight ${scoreColor(score)}`}>
-                {score}
+            {isPartial ? (
+              <span className="text-2xl font-semibold text-muted-foreground">
+                Scoring…
               </span>
-              <span className="text-2xl text-muted-foreground"> / 100</span>
-            </div>
+            ) : (
+              <div className="flex items-baseline justify-end gap-1">
+                <span
+                  className={`text-6xl font-bold tracking-tight ${scoreColor(score)}`}
+                >
+                  {score}
+                </span>
+                <span className="text-2xl text-muted-foreground"> / 100</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -243,17 +308,27 @@ function AuditDetail() {
         {/* Overview */}
         <TabsContent value="overview" className="space-y-6">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard title="Visibility Score" value={`${score}`} icon={Eye} description="out of 100" />
+            <StatCard
+              title="Visibility Score"
+              value={isPartial ? "—" : `${score}`}
+              icon={Eye}
+              description="out of 100"
+            />
             <StatCard
               title="Queries Cited"
               value={`${cited} / ${total}`}
               icon={CheckCircle2}
               description="brand appeared in answer"
             />
-            <StatCard title="Avg. Position" value={`${avgPosition}`} icon={Crosshair} description="when cited" />
+            <StatCard
+              title="Avg. Position"
+              value={`${avgPosition}`}
+              icon={Crosshair}
+              description="when cited"
+            />
             <StatCard
               title="High-Severity Issues"
-              value={`${highSeverity}`}
+              value={isPartial ? "—" : `${highSeverity}`}
               icon={AlertTriangle}
               description="need attention"
             />

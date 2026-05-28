@@ -3,7 +3,7 @@ import { parseCitations } from './citation-parser';
 import { classifySource, competitorToDomain } from './source-classifier';
 import { buildSuggestion } from './suggestion-engine';
 import { getSupabaseAdmin } from '../db/supabase';
-import { finalizeAudit } from './orchestrator';
+import { finalizeAuditFast, enrichAudit } from './orchestrator';
 import type { Citation, InlineCitation } from '../db/types';
 import type { Env, AuditQueueMessage } from '../db/supabase';
 
@@ -171,10 +171,14 @@ export async function processQueueBatch(
     if (audit.status === 'completed' || audit.status === 'failed') continue;
     if ((audit.progress_done ?? 0) < (audit.progress_total ?? 0)) continue;
 
-    // Finalization makes 1 positioning + N per-query gpt-4o-mini calls,
-    // aggregates the citation judgments into discovered competitors, writes
-    // per-query suggestions/roles/discovered_in_query, and marks the audit
-    // completed. See orchestrator.finalizeAudit.
-    await finalizeAudit(auditId, env);
+    // Two-phase finalize. FAST: a CAS claim (running → finalizing) flips the
+    // audit to 'completed' with deterministic data so the UI unblocks
+    // immediately — only the CAS winner proceeds (no double-finalize). ENRICH:
+    // the LLM step (positioning + per-query suggestions + competitor
+    // reclassification) patches the rows in place; the UI upgrades tiers live.
+    const claimed = await finalizeAuditFast(auditId, env);
+    if (claimed) {
+      await enrichAudit(auditId, env);
+    }
   }
 }

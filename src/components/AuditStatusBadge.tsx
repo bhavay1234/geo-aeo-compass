@@ -18,6 +18,12 @@ const CONFIG: Record<
     icon: Loader2,
     spin: true,
   },
+  finalizing: {
+    label: "Scoring",
+    className: "border-primary/30 bg-primary/10 text-primary",
+    icon: Loader2,
+    spin: true,
+  },
   completed: {
     label: "Completed",
     className: "border-success/30 bg-success/10 text-success",

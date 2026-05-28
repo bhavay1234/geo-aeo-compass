@@ -3,7 +3,12 @@
  * See supabase/migrations/0001_initial.sql
  */
 
-export type AuditStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type AuditStatus =
+  | 'pending'
+  | 'running'
+  | 'finalizing'
+  | 'completed'
+  | 'failed';
 
 export type QueryCategory =
   | 'problem'

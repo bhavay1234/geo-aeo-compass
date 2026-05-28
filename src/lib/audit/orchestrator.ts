@@ -2,11 +2,7 @@ import { pollChatGPT } from '../llm';
 import { parseCitations } from './citation-parser';
 import { generateQueries, type BuyerQuery } from './query-bank';
 import { competitorToDomain, normalizeDomain } from './source-classifier';
-import {
-  inferPositioning,
-  generateQuerySuggestion,
-  mapWithConcurrency,
-} from '../llm/suggestions';
+import { inferPositioning, generateQuerySuggestion } from '../llm/suggestions';
 import { getSupabaseAdmin, type Env } from '../db/supabase';
 import type {
   AuditSummary,
@@ -24,8 +20,6 @@ import type {
   Confidence,
   DiscoveredInQuery,
 } from '../db/types';
-
-const SUGGESTION_CONCURRENCY = 5;
 
 const BATCH_SIZE = 3;
 
@@ -379,112 +373,24 @@ type FinalizePoll = {
   suggestion: Suggestion | null;
 };
 
-/**
- * Finalize a completed audit. Cost shape per audit:
- *   - N search-preview polls (already done by the queue consumer, per message)
- *   - 1 gpt-4o-mini positioning-inference call
- *   - N gpt-4o-mini per-query suggestion calls (pooled, capped concurrency)
- *
- * Each per-query call returns a positioning-anchored action AND a judgment of
- * every cited domain (competitor|source|unsure). Those judgments are aggregated
- * with NO extra call to build discovered_competitors and to tier the per-query
- * pills — the per-query LLM judgment overrides the rule-based source label.
- *
- * Caveat: positioning + competitor judgments are page-context inference, not
- * ground truth (a homepage scrape is the v1.1 Apify upgrade).
- */
-export async function finalizeAudit(auditId: string, env: Env): Promise<void> {
-  const supabase = getSupabaseAdmin(env);
+type ExternalDomainStat = {
+  domain: string;
+  norm: string;
+  citation_count: number;
+  queries: Set<string>;
+  sample_url: string;
+  source_type: SourceType;
+};
 
-  const { data: audit } = await supabase
-    .from('audits')
-    .select('*')
-    .eq('id', auditId)
-    .single();
-  if (!audit) return;
-
-  const brandName: string = audit.brand_name;
-  const brandDomain: string = audit.domain;
-  const namedCompetitors: string[] = Array.isArray(audit.competitors)
-    ? audit.competitors
-    : [];
-
-  const { data: pollData } = await supabase
-    .from('poll_results')
-    .select(
-      'id, query_text, full_response, citations, brand_cited, brand_position, suggestion'
-    )
-    .eq('audit_id', auditId);
-  const polls = (pollData as FinalizePoll[]) || [];
-
-  // 1) Positioning — ONE mini call (inferred; honest caveat in the module).
-  const positioning = await inferPositioning(
-    {
-      brandName,
-      domain: brandDomain,
-      queries: polls.map((p) => p.query_text),
-      excerpts: polls.map((p) => p.full_response || '').filter(Boolean),
-    },
-    env
-  );
-
-  // 2) Per-query positioning-aware suggestion + citation judgments — N mini
-  //    calls, pooled. Each falls back to the deterministic suggestion on failure.
-  const perQuery = await mapWithConcurrency(
-    polls,
-    SUGGESTION_CONCURRENCY,
-    async (p) => {
-      const citations = (p.citations as Citation[]) || [];
-      const llm = await generateQuerySuggestion(
-        {
-          brandName,
-          domain: brandDomain,
-          positioning,
-          query: p.query_text,
-          fullResponse: p.full_response || '',
-          citations,
-          brandCited: p.brand_cited,
-          brandPosition: p.brand_position,
-        },
-        env
-      );
-      return { poll: p, llm };
-    }
-  );
-
-  // 3) Aggregate citation judgments per normalized domain. Competitor wins.
-  const ownNorm = normalizeDomain(brandDomain);
-  const namedNorm = new Set(
-    namedCompetitors
-      .map((c) => normalizeDomain(competitorToDomain(c)))
-      .filter(Boolean)
-  );
-  const competitorJudgedCount = new Map<string, number>();
-  for (const { llm } of perQuery) {
-    if (!llm) continue;
-    for (const j of llm.judgments) {
-      const d = normalizeDomain(j.domain);
-      if (!d || d === ownNorm || namedNorm.has(d)) continue;
-      if (j.role === 'competitor') {
-        competitorJudgedCount.set(d, (competitorJudgedCount.get(d) || 0) + 1);
-      }
-    }
-  }
-
-  // 4) Aggregate external cited-domain stats across all polls.
-  const stats = new Map<
-    string,
-    {
-      domain: string;
-      norm: string;
-      citation_count: number;
-      queries: Set<string>;
-      sample_url: string;
-      source_type: SourceType;
-    }
-  >();
+/** Aggregate every external (non-own, non-named-competitor) cited domain. */
+function aggregateExternalDomains(
+  polls: Array<{ query_text: string; citations: Citation[] | null }>,
+  ownNorm: string,
+  namedNorm: Set<string>
+): Map<string, ExternalDomainStat> {
+  const stats = new Map<string, ExternalDomainStat>();
   for (const p of polls) {
-    for (const c of (p.citations as Citation[]) || []) {
+    for (const c of p.citations || []) {
       const d = normalizeDomain(c.domain);
       if (!d) continue;
       if (ownNorm && (d === ownNorm || d.endsWith('.' + ownNorm))) continue;
@@ -505,126 +411,318 @@ export async function finalizeAudit(auditId: string, env: Env): Promise<void> {
       }
     }
   }
+  return stats;
+}
 
-  // 5) Build discovered_competitors from judgments + stats (NO extra call).
-  //    Domain judged 'competitor' in >=1 query → competitor (the per-query LLM
-  //    judgment overrides the rule-based source_type). Others labeled by type.
-  //    Caveat: still page-context inference, not ground truth.
-  const discoveredAll: DiscoveredCompetitor[] = Array.from(stats.values()).map(
-    (s) => {
-      const compCount = competitorJudgedCount.get(s.norm) || 0;
-      const isCompetitor = compCount > 0;
-      const label: DiscoveredLabel = isCompetitor
-        ? 'competitor'
-        : sourceTypeToLabel(s.source_type);
-      const confidence: Confidence = isCompetitor
-        ? compCount >= 2
-          ? 'high'
-          : 'medium'
-        : 'low';
-      return {
+/**
+ * FAST finalize — deterministic only, NO LLM calls. Wins a CAS claim
+ * (running → finalizing), writes the rule-based summary/insights/discovered,
+ * flips status to 'completed', and returns true. The UI renders as soon as
+ * status is 'completed'; enrichAudit then upgrades tiers/positioning in place.
+ *
+ * The CAS (conditional update on status='running') ensures only ONE worker
+ * finalizes — kills the double-finalize race.
+ */
+export async function finalizeAuditFast(
+  auditId: string,
+  env: Env
+): Promise<boolean> {
+  const supabase = getSupabaseAdmin(env);
+
+  const { data: claimed, error: claimErr } = await supabase
+    .from('audits')
+    .update({ status: 'finalizing' })
+    .eq('id', auditId)
+    .eq('status', 'running')
+    .select('id');
+  if (claimErr) {
+    console.error('[finalize:fast] claim error:', claimErr.message);
+    return false;
+  }
+  if (!claimed || claimed.length === 0) return false; // another worker won
+
+  try {
+    const { data: audit } = await supabase
+      .from('audits')
+      .select('*')
+      .eq('id', auditId)
+      .single();
+    if (!audit) return false;
+
+    const brandName: string = audit.brand_name;
+    const brandDomain: string = audit.domain;
+    const namedCompetitors: string[] = Array.isArray(audit.competitors)
+      ? audit.competitors
+      : [];
+
+    const { data: pollData } = await supabase
+      .from('poll_results')
+      .select('query_text, citations')
+      .eq('audit_id', auditId);
+    const polls =
+      (pollData as Array<{ query_text: string; citations: Citation[] | null }>) ||
+      [];
+
+    const ownNorm = normalizeDomain(brandDomain);
+    const namedNorm = new Set(
+      namedCompetitors
+        .map((c) => normalizeDomain(competitorToDomain(c)))
+        .filter(Boolean)
+    );
+
+    // Rule-based discovered list (no LLM): label by source_type. Competitor
+    // promotion happens later in enrichAudit via per-query judgments.
+    const stats = aggregateExternalDomains(polls, ownNorm, namedNorm);
+    const discovered: DiscoveredCompetitor[] = Array.from(stats.values())
+      .map((s) => ({
         domain: s.domain,
         citation_count: s.citation_count,
         queries_seen_in: s.queries.size,
-        label,
-        confidence,
+        label: sourceTypeToLabel(s.source_type),
+        confidence: 'low' as Confidence,
         sample_url: s.sample_url,
-      };
-    }
-  );
+      }))
+      .sort((a, b) => b.queries_seen_in - a.queries_seen_in)
+      .slice(0, 12);
 
-  // Keep all competitors; cap non-competitor "other sources" for readability.
-  const competitorsList = discoveredAll
-    .filter((d) => d.label === 'competitor')
-    .sort((a, b) => b.queries_seen_in - a.queries_seen_in);
-  const otherList = discoveredAll
-    .filter((d) => d.label !== 'competitor')
-    .sort((a, b) => b.queries_seen_in - a.queries_seen_in)
-    .slice(0, 10);
-  const discovered = [...competitorsList, ...otherList];
+    const insights = await computeInsights(auditId, env);
+    insights.discovered_competitor_count = 0; // enrich fills this in
+    const summary = await computeSummary(auditId, brandName, namedCompetitors, env);
+    summary.headline = buildInsightHeadline(summary, insights);
+    const visibilityScore = Math.round((summary.visibility_rate ?? 0) * 100);
 
-  // 6) Per-domain label lookup for the per-query pills.
-  const labelLookup = new Map<
-    string,
-    { label: DiscoveredLabel; confidence: Confidence }
-  >();
-  for (const d of discovered) {
-    labelLookup.set(normalizeDomain(d.domain), {
-      label: d.label,
-      confidence: d.confidence,
-    });
+    // positioning stays NULL → the UI marker that enrichment is still pending.
+    await supabase
+      .from('audits')
+      .update({
+        status: 'completed',
+        visibility_score: visibilityScore,
+        summary,
+        insights,
+        discovered_competitors: discovered,
+        completed_at: new Date().toISOString(),
+      })
+      .eq('id', auditId);
+
+    console.log(
+      `[finalize:fast] audit ${auditId} completed (deterministic), score ${visibilityScore}`
+    );
+    return true;
+  } catch (err: any) {
+    console.error('[finalize:fast] failed:', err?.message);
+    await supabase
+      .from('audits')
+      .update({
+        status: 'failed',
+        error_message: (err?.message || 'finalize failed').slice(0, 500),
+      })
+      .eq('id', auditId);
+    return false;
   }
+}
 
-  // 7) Per-poll write: LLM action (or deterministic fallback), citation_roles,
-  //    and discovered_in_query (external domains, tiered by aggregated judgment).
-  await mapWithConcurrency(
-    perQuery,
-    SUGGESTION_CONCURRENCY,
-    async ({ poll, llm }) => {
-      const citations = (poll.citations as Citation[]) || [];
-      const byDomain = new Map<string, DiscoveredInQuery>();
-      for (const c of citations) {
-        const d = normalizeDomain(c.domain);
-        if (!d) continue;
-        if (ownNorm && (d === ownNorm || d.endsWith('.' + ownNorm))) continue;
-        if (namedNorm.has(d)) continue;
-        const lk = labelLookup.get(d);
-        const entry: DiscoveredInQuery = {
-          domain: c.domain,
-          url: c.url,
-          title: c.title,
-          source_type: c.source_type,
-          label: lk?.label ?? null,
-          confidence: lk?.confidence ?? null,
-        };
-        const ex = byDomain.get(c.domain);
-        if (!ex || (!ex.label && entry.label)) byDomain.set(c.domain, entry);
+/**
+ * ENRICH — the LLM step, run AFTER status is already 'completed'. Cost:
+ *   - 1 gpt-4o-mini positioning-inference call
+ *   - N gpt-4o-mini per-query suggestion calls, ALL fired in parallel
+ *     (Promise.allSettled) each with a per-call timeout; a timed-out/failed
+ *     call falls back to the deterministic suggestion + rule-based label so a
+ *     single slow call never hangs the whole finalize.
+ *
+ * Patches suggestion.action, citation_roles, and discovered_in_query per poll,
+ * reclassifies discovered competitors from the aggregated judgments, and sets
+ * audits.positioning (non-null = enrichment done; the UI stops refetching).
+ *
+ * Caveat: positioning + competitor judgments are page-context inference, not
+ * ground truth (a homepage scrape is the v1.1 Apify upgrade).
+ */
+export async function enrichAudit(auditId: string, env: Env): Promise<void> {
+  const supabase = getSupabaseAdmin(env);
+  try {
+    const { data: audit } = await supabase
+      .from('audits')
+      .select('*')
+      .eq('id', auditId)
+      .single();
+    if (!audit) return;
+
+    const brandName: string = audit.brand_name;
+    const brandDomain: string = audit.domain;
+    const namedCompetitors: string[] = Array.isArray(audit.competitors)
+      ? audit.competitors
+      : [];
+
+    const { data: pollData } = await supabase
+      .from('poll_results')
+      .select(
+        'id, query_text, full_response, citations, brand_cited, brand_position, suggestion'
+      )
+      .eq('audit_id', auditId);
+    const polls = (pollData as FinalizePoll[]) || [];
+
+    // 1) Positioning — ONE mini call.
+    const positioning = await inferPositioning(
+      {
+        brandName,
+        domain: brandDomain,
+        queries: polls.map((p) => p.query_text),
+        excerpts: polls.map((p) => p.full_response || '').filter(Boolean),
+      },
+      env
+    );
+
+    // 2) Per-query suggestions — ALL fired in parallel; each call self-limits
+    //    via its own timeout and returns null on failure (→ deterministic).
+    const settled = await Promise.allSettled(
+      polls.map((p) =>
+        generateQuerySuggestion(
+          {
+            brandName,
+            domain: brandDomain,
+            positioning,
+            query: p.query_text,
+            fullResponse: p.full_response || '',
+            citations: (p.citations as Citation[]) || [],
+            brandCited: p.brand_cited,
+            brandPosition: p.brand_position,
+          },
+          env
+        )
+      )
+    );
+    const perQuery = polls.map((poll, i) => {
+      const s = settled[i];
+      return { poll, llm: s.status === 'fulfilled' ? s.value : null };
+    });
+
+    // 3) Aggregate citation judgments per normalized domain. Competitor wins.
+    const ownNorm = normalizeDomain(brandDomain);
+    const namedNorm = new Set(
+      namedCompetitors
+        .map((c) => normalizeDomain(competitorToDomain(c)))
+        .filter(Boolean)
+    );
+    const competitorJudgedCount = new Map<string, number>();
+    for (const { llm } of perQuery) {
+      if (!llm) continue;
+      for (const j of llm.judgments) {
+        const d = normalizeDomain(j.domain);
+        if (!d || d === ownNorm || namedNorm.has(d)) continue;
+        if (j.role === 'competitor') {
+          competitorJudgedCount.set(d, (competitorJudgedCount.get(d) || 0) + 1);
+        }
       }
-      const discoveredInQuery = Array.from(byDomain.values());
-
-      const base = poll.suggestion;
-      const action = llm?.action?.trim() || base?.action || '';
-      const suggestion: Suggestion | null = base ? { ...base, action } : null;
-      const citationRoles: CitationRole[] = llm?.judgments ?? [];
-
-      await supabase
-        .from('poll_results')
-        .update({
-          suggestion,
-          citation_roles: citationRoles,
-          discovered_in_query: discoveredInQuery,
-        })
-        .eq('id', poll.id);
     }
-  );
 
-  // 8) Insights + summary (read the now-updated polls). Suggestion situation/
-  //    severity are unchanged by the action swap, so these stay valid.
-  const insights = await computeInsights(auditId, env);
-  insights.discovered_competitor_count = competitorsList.length;
-  const summary = await computeSummary(auditId, brandName, namedCompetitors, env);
-  summary.headline = buildInsightHeadline(summary, insights);
-  const visibilityScore = Math.round((summary.visibility_rate ?? 0) * 100);
+    // 4) Reclassify discovered competitors from judgments + stats.
+    const stats = aggregateExternalDomains(polls, ownNorm, namedNorm);
+    const discoveredAll: DiscoveredCompetitor[] = Array.from(stats.values()).map(
+      (s) => {
+        const compCount = competitorJudgedCount.get(s.norm) || 0;
+        const isCompetitor = compCount > 0;
+        return {
+          domain: s.domain,
+          citation_count: s.citation_count,
+          queries_seen_in: s.queries.size,
+          label: (isCompetitor
+            ? 'competitor'
+            : sourceTypeToLabel(s.source_type)) as DiscoveredLabel,
+          confidence: (isCompetitor
+            ? compCount >= 2
+              ? 'high'
+              : 'medium'
+            : 'low') as Confidence,
+          sample_url: s.sample_url,
+        };
+      }
+    );
+    const competitorsList = discoveredAll
+      .filter((d) => d.label === 'competitor')
+      .sort((a, b) => b.queries_seen_in - a.queries_seen_in);
+    const otherList = discoveredAll
+      .filter((d) => d.label !== 'competitor')
+      .sort((a, b) => b.queries_seen_in - a.queries_seen_in)
+      .slice(0, 10);
+    const discovered = [...competitorsList, ...otherList];
 
-  // 9) Finalize the audit row.
-  await supabase
-    .from('audits')
-    .update({
-      status: 'completed',
-      visibility_score: visibilityScore,
-      summary,
-      insights,
-      discovered_competitors: discovered,
-      positioning,
-      completed_at: new Date().toISOString(),
-    })
-    .eq('id', auditId);
+    const labelLookup = new Map<
+      string,
+      { label: DiscoveredLabel; confidence: Confidence }
+    >();
+    for (const d of discovered) {
+      labelLookup.set(normalizeDomain(d.domain), {
+        label: d.label,
+        confidence: d.confidence,
+      });
+    }
 
-  console.log(
-    `[finalize] audit ${auditId} done — score ${visibilityScore}, ` +
-      `${competitorsList.length} discovered competitors, ` +
-      `${polls.length} suggestion calls + 1 positioning call`
-  );
+    // 5) Patch each poll in parallel (allSettled — one bad write can't hang it).
+    await Promise.allSettled(
+      perQuery.map(async ({ poll, llm }) => {
+        const citations = (poll.citations as Citation[]) || [];
+        const byDomain = new Map<string, DiscoveredInQuery>();
+        for (const c of citations) {
+          const d = normalizeDomain(c.domain);
+          if (!d) continue;
+          if (ownNorm && (d === ownNorm || d.endsWith('.' + ownNorm))) continue;
+          if (namedNorm.has(d)) continue;
+          const lk = labelLookup.get(d);
+          const entry: DiscoveredInQuery = {
+            domain: c.domain,
+            url: c.url,
+            title: c.title,
+            source_type: c.source_type,
+            label: lk?.label ?? null,
+            confidence: lk?.confidence ?? null,
+          };
+          const ex = byDomain.get(c.domain);
+          if (!ex || (!ex.label && entry.label)) byDomain.set(c.domain, entry);
+        }
+        const discoveredInQuery = Array.from(byDomain.values());
+
+        const base = poll.suggestion;
+        const action = llm?.action?.trim() || base?.action || '';
+        const suggestion: Suggestion | null = base ? { ...base, action } : null;
+        const citationRoles: CitationRole[] = llm?.judgments ?? [];
+
+        await supabase
+          .from('poll_results')
+          .update({
+            suggestion,
+            citation_roles: citationRoles,
+            discovered_in_query: discoveredInQuery,
+          })
+          .eq('id', poll.id);
+      })
+    );
+
+    // 6) Recompute insights/headline with the corrected competitor count and
+    //    write positioning (non-null marks enrichment complete for the UI).
+    const insights = await computeInsights(auditId, env);
+    insights.discovered_competitor_count = competitorsList.length;
+    const summary = await computeSummary(auditId, brandName, namedCompetitors, env);
+    summary.headline = buildInsightHeadline(summary, insights);
+
+    await supabase
+      .from('audits')
+      .update({
+        summary,
+        insights,
+        discovered_competitors: discovered,
+        positioning: positioning ?? '',
+      })
+      .eq('id', auditId);
+
+    console.log(
+      `[finalize:enrich] audit ${auditId} — ${competitorsList.length} competitors, ` +
+        `${polls.length} suggestion calls + 1 positioning call`
+    );
+  } catch (err: any) {
+    console.error('[finalize:enrich] failed:', err?.message);
+    // Leave the deterministic 'completed' state intact, but set positioning
+    // non-null so the UI stops waiting for enrichment.
+    await supabase.from('audits').update({ positioning: '' }).eq('id', auditId);
+  }
 }
 
 /**
