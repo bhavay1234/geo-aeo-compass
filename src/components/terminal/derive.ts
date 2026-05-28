@@ -35,28 +35,46 @@ export function tagSource(
   return { kind: "agg", subtype: "source" };
 }
 
-/** Clean display names of the competitor/discovered brands cited in one query (excl. own). */
+/**
+ * Same-industry competitor domains cited in ONE answer, decided by the
+ * per-query LLM role judgment (citation_roles) plus the discovered_in_query
+ * competitor label — NOT a static vendor-domain guess. Returns normalized
+ * domains.
+ */
+export function competitorDomainsInPoll(p: PollResult): Set<string> {
+  const out = new Set<string>();
+  for (const r of p.citation_roles ?? []) {
+    if (r.role !== "competitor") continue;
+    const d = normalizeDomain(r.domain);
+    if (d) out.add(d);
+  }
+  for (const d of p.discovered_in_query ?? []) {
+    if (d.label !== "competitor") continue;
+    const nd = normalizeDomain(d.domain);
+    if (nd) out.add(nd);
+  }
+  return out;
+}
+
+/** Clean display names of the competitor brands cited in one query (excl. own). */
 export function whoCited(p: PollResult, ownNorm: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const c of p.competitors_cited ?? []) {
-    const nm = (c.name || "").trim();
+  const add = (name: string) => {
+    const nm = (name || "").trim();
     const key = nm.toLowerCase();
     if (nm && !seen.has(key)) {
       seen.add(key);
       out.push(nm);
     }
-  }
-  for (const d of p.discovered_in_query ?? []) {
-    if (d.label !== "competitor") continue;
-    const dn = normalizeDomain(d.domain);
-    if (ownNorm && (dn === ownNorm || dn.endsWith("." + ownNorm))) continue;
-    const nm = deriveBrandName(d.title, d.domain);
-    const key = nm.toLowerCase();
-    if (!seen.has(key)) {
-      seen.add(key);
-      out.push(nm);
-    }
+  };
+  for (const c of p.competitors_cited ?? []) add(c.name);
+  for (const dom of competitorDomainsInPoll(p)) {
+    if (ownNorm && (dom === ownNorm || dom.endsWith("." + ownNorm))) continue;
+    const diq = (p.discovered_in_query ?? []).find(
+      (d) => normalizeDomain(d.domain) === dom
+    );
+    add(diq ? deriveBrandName(diq.title, diq.domain) : domainToBrand(dom));
   }
   return out;
 }
@@ -112,6 +130,11 @@ export interface SovEntry {
  */
 export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry[] {
   const ownNorm = normalizeDomain(audit.domain);
+  const namedNorm = new Set(
+    (audit.competitors ?? [])
+      .map((c) => normalizeDomain(competitorToDomain(c)))
+      .filter(Boolean)
+  );
   const counts = new Map<string, { name: string; domain: string | null; count: number; isYou: boolean }>();
   const bump = (key: string, name: string, domain: string | null, isYou: boolean) => {
     const ex = counts.get(key);
@@ -126,10 +149,9 @@ export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry
       const nm = (c.name || "").trim();
       if (nm) perQuery.add("name:" + nm.toLowerCase());
     }
-    for (const d of p.discovered_in_query ?? []) {
-      if (d.label !== "competitor") continue;
-      const dn = normalizeDomain(d.domain);
+    for (const dn of competitorDomainsInPoll(p)) {
       if (ownNorm && (dn === ownNorm || dn.endsWith("." + ownNorm))) continue;
+      if (namedNorm.has(dn)) continue; // named handled via the name key
       perQuery.add("dom:" + dn);
     }
     // Resolve keys → entries.
@@ -167,6 +189,8 @@ export interface CompetitorProfile {
   name: string;
   domain: string | null;
   isYou: boolean;
+  /** Competitor surfaced by role judgment but not on the tracked list. */
+  discovered: boolean;
   sovPct: number;
   tier: 1 | 2 | 3;
   verdict: string;
@@ -191,8 +215,15 @@ function pollCitesEntity(
   if (isYou) return p.brand_cited;
   if ((p.competitors_cited ?? []).some((c) => c.name.toLowerCase() === name.toLowerCase()))
     return true;
-  return (p.discovered_in_query ?? []).some(
-    (d) => normalizeDomain(d.domain) === domainNorm
+  if (!domainNorm) return false;
+  return (
+    (p.discovered_in_query ?? []).some(
+      (d) => normalizeDomain(d.domain) === domainNorm
+    ) ||
+    (p.citations ?? []).some((c) => normalizeDomain(c.domain) === domainNorm) ||
+    (p.citation_roles ?? []).some(
+      (r) => r.role === "competitor" && normalizeDomain(r.domain) === domainNorm
+    )
   );
 }
 
@@ -209,11 +240,36 @@ export function buildCompetitorProfiles(
   const namedNorm = new Set(
     (audit.competitors ?? []).map((c) => normalizeDomain(c)).filter(Boolean)
   );
-  const competitorJudged = new Set(
-    (audit.discovered_competitors ?? [])
-      .filter((d) => d.label === "competitor")
-      .map((d) => normalizeDomain(d.domain))
+  const namedDomainNorm = new Set(
+    (audit.competitors ?? [])
+      .map((c) => normalizeDomain(competitorToDomain(c)))
+      .filter(Boolean)
   );
+
+  // Same-industry competitors cited anywhere in the run, from per-query LLM
+  // role judgments — resilient even if the audit-level discovered_competitors
+  // aggregation never persisted. norm domain -> display name.
+  const roleCompetitors = new Map<string, string>();
+  for (const p of polls) {
+    for (const dom of competitorDomainsInPoll(p)) {
+      if (!dom || dom === ownNorm || dom.endsWith("." + ownNorm)) continue;
+      if (namedDomainNorm.has(dom) || roleCompetitors.has(dom)) continue;
+      const diq = (p.discovered_in_query ?? []).find(
+        (d) => normalizeDomain(d.domain) === dom
+      );
+      roleCompetitors.set(
+        dom,
+        diq ? deriveBrandName(diq.title, diq.domain) : domainToBrand(dom)
+      );
+    }
+  }
+
+  const competitorJudged = new Set<string>([
+    ...(audit.discovered_competitors ?? [])
+      .filter((d) => d.label === "competitor")
+      .map((d) => normalizeDomain(d.domain)),
+    ...roleCompetitors.keys(),
+  ]);
 
   const verdictByKey = new Map<string, string>();
   for (const v of audit.competitor_verdicts ?? []) {
@@ -231,19 +287,31 @@ export function buildCompetitorProfiles(
     }
   }
 
-  type Entity = { name: string; domain: string | null; isYou: boolean };
+  type Entity = { name: string; domain: string | null; isYou: boolean; discovered: boolean };
   const entities: Entity[] = [
-    { name: audit.brand_name, domain: audit.domain, isYou: true },
+    { name: audit.brand_name, domain: audit.domain, isYou: true, discovered: false },
     ...(audit.competitors ?? []).map((n) => ({
       name: n,
       domain: competitorToDomain(n),
       isYou: false,
+      discovered: false,
     })),
     ...(audit.discovered_competitors ?? [])
       .filter((d) => d.label === "competitor")
-      .map((d) => ({ name: domainToBrand(d.domain), domain: d.domain, isYou: false })),
+      .map((d) => ({
+        name: domainToBrand(d.domain),
+        domain: d.domain,
+        isYou: false,
+        discovered: true,
+      })),
+    ...Array.from(roleCompetitors.entries()).map(([dom, name]) => ({
+      name,
+      domain: dom,
+      isYou: false,
+      discovered: true,
+    })),
   ];
-  // Dedupe by lowercased name.
+  // Dedupe by lowercased name (named entries come first, so they win the tag).
   const seen = new Set<string>();
   const uniq = entities.filter((e) => {
     const k = e.name.toLowerCase();
@@ -297,6 +365,7 @@ export function buildCompetitorProfiles(
       name: e.name,
       domain: e.domain,
       isYou: e.isYou,
+      discovered: e.discovered,
       sovPct,
       tier: tierForPct(sovPct),
       verdict,

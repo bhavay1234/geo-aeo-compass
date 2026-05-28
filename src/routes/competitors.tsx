@@ -98,6 +98,14 @@ function ProfileCard({
             </div>
           )}
         </div>
+        {p.discovered && (
+          <span
+            className="tm-tier tm-t2"
+            title="Surfaced by ChatGPT, not on your tracked list — re-run with it named to track it"
+          >
+            Discovered
+          </span>
+        )}
         <span className={`tm-tier ${TIER_CLASS[p.tier]}`}>T{p.tier}</span>
         <span
           className="mono"

@@ -571,8 +571,8 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       .eq('audit_id', auditId);
     const polls = (pollData as FinalizePoll[]) || [];
 
-    // 1) Positioning — ONE mini call.
-    const positioning = await inferPositioning(
+    // 1) Positioning + market category — ONE mini call.
+    const { positioning, category } = await inferPositioning(
       {
         brandName,
         domain: brandDomain,
@@ -714,9 +714,30 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       })
     );
 
-    // 6) Brand verdicts — batched "what is X?" mini-calls for the user's brand
-    //    + each profiled competitor (named + discovered). One call each, all
-    //    fired in parallel; failures fall back to ''.
+    // 6) Recompute insights/summary with the corrected competitor count, then
+    //    persist in THREE staged writes so a missing/unmigrated column can't
+    //    cascade-drop the others (the cause of empty competitors/verdicts):
+    //      a. core data — columns present since 0002/0004
+    //      b. positioning + category markers — 0006 / base schema
+    //      c. verdicts — 0008
+    //    Verdicts are also the slowest (N mini-calls), so writing the core
+    //    first means competitor data lands even if verdicts are slow or fail.
+    const insights = await computeInsights(auditId, env);
+    insights.discovered_competitor_count = competitorsList.length;
+    const summary = await computeSummary(auditId, brandName, namedCompetitors, env);
+    summary.headline = buildInsightHeadline(summary, insights);
+
+    await supabase
+      .from('audits')
+      .update({ summary, insights, discovered_competitors: discovered })
+      .eq('id', auditId);
+    await supabase
+      .from('audits')
+      .update({ positioning: positioning ?? '', category: category || null })
+      .eq('id', auditId);
+
+    // Brand verdicts — "what is X?" for the user's brand + each profiled
+    // competitor (named + discovered). Fired in parallel; failures fall back ''.
     const verdictTargets: Array<{ name: string; domain: string | null; isYou: boolean }> = [
       { name: brandName, domain: brandDomain, isYou: true },
       ...namedCompetitors.map((n) => ({
@@ -749,24 +770,9 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       else competitorVerdicts.push({ name: t.name, domain: t.domain, verdict: v });
     });
 
-    // 7) Recompute insights/headline with the corrected competitor count and
-    //    write positioning (non-null marks enrichment complete for the UI).
-    const insights = await computeInsights(auditId, env);
-    insights.discovered_competitor_count = competitorsList.length;
-    const summary = await computeSummary(auditId, brandName, namedCompetitors, env);
-    summary.headline = buildInsightHeadline(summary, insights);
-
-    // Core finalize data first (columns guaranteed present), then the
-    // enrichment markers separately so a missing 0006/0008 column can't drop
-    // the corrected summary/insights/discovered_competitors with it.
-    await supabase
-      .from('audits')
-      .update({ summary, insights, discovered_competitors: discovered })
-      .eq('id', auditId);
     await supabase
       .from('audits')
       .update({
-        positioning: positioning ?? '',
         brand_verdict: brandVerdict,
         competitor_verdicts: competitorVerdicts,
       })

@@ -60,11 +60,20 @@ function subline(g: GapRow): { __html: string } {
 function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const { audits } = useWorkspace();
   const gaps = buildGapRows(audit, polls);
-  const sov = computeShareOfVoice(audit, polls).slice(0, 5);
+  const sovFull = computeShareOfVoice(audit, polls);
+  const sov = sovFull.slice(0, 5);
   const sovMax = Math.max(1, ...sov.map((s) => s.pct));
 
+  const total = polls.length;
   const absent = gaps.filter((g) => g.state === "absent").length;
+  const weak = gaps.filter((g) => g.state === "weak").length;
   const held = gaps.filter((g) => g.state === "held").length;
+
+  // Plain-language headline: inferred category + who leads citation share.
+  const category = (audit.category ?? "").trim();
+  const leader = sovFull[0] ?? null;
+  const youEntry = sovFull.find((s) => s.isYou) ?? null;
+  const youRank = sovFull.findIndex((s) => s.isYou) + 1; // 0 → not cited at all
 
   // Trajectory from prior completed runs of the same brand+domain.
   const runs = audits
@@ -119,6 +128,39 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
           <span className="meta">citation share · this run</span>
         </div>
         <div className="tm-sov">
+          <div
+            style={{
+              fontSize: 12.5,
+              color: "var(--ink-2)",
+              lineHeight: 1.6,
+              padding: "2px 0 14px",
+            }}
+          >
+            {category && (
+              <>
+                <span style={{ color: "var(--ink-3)" }}>Category</span>{" "}
+                <b style={{ color: "var(--ink)" }}>{category}</b>
+                {"  ·  "}
+              </>
+            )}
+            {leader && (
+              <>
+                <span style={{ color: "var(--ink-3)" }}>Citation leader</span>{" "}
+                <b style={{ color: leader.isYou ? "var(--you)" : "var(--ink)" }}>
+                  {leader.name}
+                </b>{" "}
+                <span className="mono">{leader.pct}%</span>
+                {"  ·  "}
+              </>
+            )}
+            <span style={{ color: "var(--ink-3)" }}>You</span>{" "}
+            <b style={{ color: "var(--you)" }}>{youEntry ? youEntry.pct : 0}%</b>
+            {youRank > 0 && (
+              <span className="mono" style={{ color: "var(--ink-3)" }}>
+                {" "}({ordinal(youRank)})
+              </span>
+            )}
+          </div>
           <div className="tm-sov-chart">
             <div className="tm-yaxis">
               <span>{sovMax}%</span>
@@ -206,10 +248,38 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
         <div className="tm-insight">
           <div className="k">⚑ The pattern</div>
           <p>
-            You hold <b>{held}</b> queries but are invisible on <b>{absent}</b>
-            {" "}— including the high-intent ones where competitors are cited
-            and you are not. Close the blind spots before defending what you
-            already own.
+            {total === 0 ? (
+              <>No queries in this run yet.</>
+            ) : absent === 0 && weak === 0 ? (
+              <>
+                You're cited on <b>all {total}</b> queries
+                {youEntry ? (
+                  <>
+                    {" "}and hold <b>{youEntry.pct}%</b> of citation share
+                  </>
+                ) : null}
+                . No blind spots — defend these and watch for competitors
+                climbing into the answers.
+              </>
+            ) : absent === 0 ? (
+              <>
+                You're cited on every query but ranked low on <b>{weak}</b> —
+                strengthen those pages before competitors climb above you.
+              </>
+            ) : held === 0 ? (
+              <>
+                You're invisible on <b>{absent}</b> of <b>{total}</b> queries —
+                competitors own this category in ChatGPT. Start with the
+                highest-intent gaps above.
+              </>
+            ) : (
+              <>
+                You hold <b>{held}</b> queries but are invisible on{" "}
+                <b>{absent}</b> — including high-intent ones where competitors
+                are cited and you are not. Close the blind spots before
+                defending what you already own.
+              </>
+            )}
           </p>
         </div>
       </div>

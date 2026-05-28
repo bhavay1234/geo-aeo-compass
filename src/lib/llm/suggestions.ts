@@ -56,13 +56,15 @@ export async function inferPositioning(
     excerpts: string[];
   },
   env: Env
-): Promise<string> {
-  if (!env.OPENAI_API_KEY) return '';
+): Promise<{ positioning: string; category: string }> {
+  if (!env.OPENAI_API_KEY) return { positioning: '', category: '' };
   const system =
-    "You infer a software brand's market positioning from limited signals. " +
-    "Reply with ONE concise sentence: who it's for + what it does + any wedge/" +
-    'differentiator. No preamble, no markdown, no quotes. If signals are thin, ' +
-    'give your best inference and keep it short and concrete.';
+    "You infer a software brand's market positioning and category from limited " +
+    'signals. Return ONLY valid JSON, no markdown: {"positioning": string, ' +
+    '"category": string}. positioning = ONE concise sentence (who it\'s for + ' +
+    'what it does + any wedge). category = the 2-4 word product category buyers ' +
+    'would name (e.g. "CRM software", "supply chain visibility"). If signals are ' +
+    'thin, give your best concrete inference.';
   const user = JSON.stringify({
     brandName: input.brandName,
     domain: input.domain,
@@ -75,7 +77,7 @@ export async function inferPositioning(
       openai.chat.completions.create({
         model: MODEL,
         temperature: 0.2,
-        max_tokens: 120,
+        max_tokens: 160,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
@@ -83,10 +85,25 @@ export async function inferPositioning(
       }),
       TIMEOUT_MS
     );
-    return (completion.choices[0]?.message?.content || '').trim();
+    const raw = (completion.choices[0]?.message?.content || '').trim();
+    try {
+      const parsed = JSON.parse(stripFences(raw)) as {
+        positioning?: unknown;
+        category?: unknown;
+      };
+      return {
+        positioning:
+          typeof parsed.positioning === 'string' ? parsed.positioning.trim() : '',
+        category:
+          typeof parsed.category === 'string' ? parsed.category.trim() : '',
+      };
+    } catch {
+      // Model ignored the JSON contract — treat the whole reply as positioning.
+      return { positioning: raw, category: '' };
+    }
   } catch (err: any) {
     console.error('[positioning] failed:', err?.message);
-    return '';
+    return { positioning: '', category: '' };
   }
 }
 
