@@ -7,6 +7,7 @@ import {
   Settings,
   Sparkles,
   Zap,
+  Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -37,9 +38,10 @@ export function Sidebar() {
             <Link
               key={item.to}
               to={item.to}
+              // Preserve the selected audit (?audit=) across sidebar navigation.
+              search={(prev) => prev}
               activeProps={{
-                className:
-                  "bg-sidebar-accent text-sidebar-accent-foreground",
+                className: "bg-sidebar-accent text-sidebar-accent-foreground",
               }}
               className={cn(
                 "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-sidebar-foreground/70 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -57,17 +59,13 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-sidebar-border p-4">
-        <div className="rounded-lg bg-sidebar-accent p-3">
-          <p className="text-xs font-medium text-sidebar-accent-foreground/80">
-            Free Plan
-          </p>
-          <p className="mt-1 text-xs text-sidebar-accent-foreground/60">
-            47 / 100 queries tracked
-          </p>
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-sidebar-border">
-            <div className="h-full w-[47%] rounded-full bg-primary" />
-          </div>
-        </div>
+        <Link
+          to="/"
+          className="flex items-center justify-center gap-2 rounded-lg bg-sidebar-accent px-3 py-2.5 text-sm font-medium text-sidebar-accent-foreground transition-colors hover:bg-sidebar-accent/80"
+        >
+          <Plus className="h-4 w-4" />
+          New Audit
+        </Link>
       </div>
     </aside>
   );

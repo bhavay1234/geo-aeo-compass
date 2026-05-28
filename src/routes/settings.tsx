@@ -1,15 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DashboardShell } from "@/components/DashboardShell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { Workspace, useWorkspace } from "@/components/Workspace";
+import { EmptyState } from "@/components/EmptyState";
+import { Settings as SettingsIcon } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
   head: () => ({
     meta: [
       { title: "Settings — AEO/GEO Tracker" },
-      { name: "description", content: "Configure your AEO/GEO Tracker account and preferences." },
+      { name: "description", content: "Audit configuration and tracking scope." },
     ],
   }),
   component: SettingsPage,
@@ -17,124 +15,83 @@ export const Route = createFileRoute("/settings")({
 
 function SettingsPage() {
   return (
-    <DashboardShell>
-      <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-card-foreground">
-            Settings
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Manage your account and tracker preferences
-          </p>
+    <Workspace title="Settings">
+      <SettingsInner />
+    </Workspace>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between px-5 py-3">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="text-sm font-medium text-card-foreground">{value}</span>
+    </div>
+  );
+}
+
+function SettingsInner() {
+  const { audit, loading } = useWorkspace();
+
+  if (loading) {
+    return (
+      <p className="py-12 text-center text-sm text-muted-foreground">Loading…</p>
+    );
+  }
+
+  if (!audit) {
+    return (
+      <EmptyState
+        icon={SettingsIcon}
+        title="No completed audits yet"
+        description="Run an audit to see its configuration here."
+        ctaLabel="Run an audit"
+        ctaTo="/"
+      />
+    );
+  }
+
+  const competitors = audit.competitors ?? [];
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div>
+        <h2 className="text-2xl font-bold tracking-tight text-card-foreground">
+          Settings
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Configuration for the selected audit
+        </p>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card">
+        <div className="border-b border-border px-5 py-3">
+          <h3 className="font-semibold text-card-foreground">Brand</h3>
         </div>
-
-        <div className="max-w-2xl space-y-8">
-          <div className="rounded-xl border border-border bg-card p-6 space-y-5">
-            <h2 className="text-lg font-semibold text-card-foreground">
-              Brand Profile
-            </h2>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="brand">Brand Name</Label>
-                <Input id="brand" defaultValue="Your Brand" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="website">Website</Label>
-                <Input id="website" defaultValue="https://yourbrand.com" />
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-6 space-y-5">
-            <h2 className="text-lg font-semibold text-card-foreground">
-              Tracking Preferences
-            </h2>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-card-foreground">
-                    Track ChatGPT
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Monitor brand mentions in ChatGPT responses
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-card-foreground">
-                    Track Perplexity
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Monitor brand mentions in Perplexity answers
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-card-foreground">
-                    Track Gemini
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Monitor brand mentions in Gemini responses
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-card-foreground">
-                    Track Claude
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Monitor brand mentions in Claude responses
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-border bg-card p-6 space-y-5">
-            <h2 className="text-lg font-semibold text-card-foreground">
-              Notifications
-            </h2>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-card-foreground">
-                    Email alerts
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Receive email when brand is mentioned
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-card-foreground">
-                    Weekly summary
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Get a weekly visibility report
-                  </p>
-                </div>
-                <Switch defaultChecked />
-              </div>
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-3">
-            <Button variant="outline">Cancel</Button>
-            <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-              Save Changes
-            </Button>
-          </div>
+        <div className="divide-y divide-border">
+          <Row label="Brand name" value={audit.brand_name} />
+          <Row label="Domain" value={audit.domain} />
+          <Row
+            label="Named competitors"
+            value={competitors.length ? competitors.join(", ") : "None"}
+          />
         </div>
       </div>
-    </DashboardShell>
+
+      <div className="rounded-xl border border-border bg-card">
+        <div className="border-b border-border px-5 py-3">
+          <h3 className="font-semibold text-card-foreground">Tracking scope</h3>
+        </div>
+        <div className="divide-y divide-border">
+          <Row label="Answer engine" value="ChatGPT (gpt-4o-search-preview)" />
+          <Row label="Queries in this audit" value={`${audit.progress_total}`} />
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        v1 tracks ChatGPT only. Additional answer engines arrive in later
+        releases.
+      </p>
+    </div>
   );
 }

@@ -51,3 +51,11 @@ export function getAuditResult(id: string): Promise<AuditResult> {
 export function getRecentAudits(): Promise<Audit[]> {
   return request<Audit[]>('/api/audits/recent');
 }
+
+export function updateNotes(auditId: string, notes: string): Promise<{ ok: true }> {
+  return request<{ ok: true }>('/api/audit/notes', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audit_id: auditId, notes }),
+  });
+}

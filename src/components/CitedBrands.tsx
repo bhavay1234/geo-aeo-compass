@@ -38,14 +38,14 @@ const LISTICLE_PREFIXES = [
   "vs ",
 ];
 
-function domainToBrand(domain: string): string {
+export function domainToBrand(domain: string): string {
   const core = normalizeDomain(domain).split(".")[0] || domain;
   if (!core) return domain;
   return core.charAt(0).toUpperCase() + core.slice(1);
 }
 
 /** Prefer a brand-looking slice of the page title; else derive from the domain. */
-function deriveBrandName(title: string, domain: string): string {
+export function deriveBrandName(title: string, domain: string): string {
   const seg = (title || "").split(/[|\-:–—]/)[0].trim();
   const lower = seg.toLowerCase();
   const looksBrand =

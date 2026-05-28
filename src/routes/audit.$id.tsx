@@ -186,7 +186,6 @@ function AuditDetail() {
   const highSeverity = full.insights?.high_severity_count ?? 0;
   const ownDomain = full.domain;
   const namedCompetitors = full.competitors ?? [];
-  const discoveredCompetitors = full.discovered_competitors ?? [];
 
   // Shared per-query rows for both Overview and Query Results tabs.
   const queryRows: QueryTableRow[] = polls.map((p) => ({
@@ -239,9 +238,6 @@ function AuditDetail() {
         <TabsList className="mb-4 flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="queries">Query Results</TabsTrigger>
-          <TabsTrigger value="competitors">Competitors</TabsTrigger>
-          <TabsTrigger value="actions">Actions</TabsTrigger>
-          <TabsTrigger value="notes">Notes</TabsTrigger>
         </TabsList>
 
         {/* Overview */}
@@ -277,81 +273,15 @@ function AuditDetail() {
           </div>
         </TabsContent>
 
-        {/* Query Results — full width, no donut. 4B-2: per-query expand goes here. */}
+        {/* Query Results — full width, no donut. Deep per-query exploration
+            (citation evidence, full answer, suggestions) lives on the
+            /queries workspace page. */}
         <TabsContent value="queries">
           <QueryTable
             polls={queryRows}
             ownDomain={ownDomain}
             namedCompetitors={namedCompetitors}
           />
-          {/* TODO(4B-2): expandable rows — citation evidence (raw_citations +
-              anchor_text), full_response, per-query suggestion, uncited
-              mentions. */}
-        </TabsContent>
-
-        {/* Competitors — minimal stub; 4B-2 builds the real panel. */}
-        <TabsContent value="competitors">
-          <div className="rounded-xl border border-border bg-card p-6">
-            <h3 className="text-lg font-semibold text-card-foreground">
-              Discovered Competitors
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Brands ChatGPT cited that you didn't name. Full breakdown coming
-              in the next pass.
-            </p>
-            {discoveredCompetitors.length === 0 ? (
-              <p className="mt-4 text-sm text-muted-foreground">
-                None discovered for this audit.
-              </p>
-            ) : (
-              <div className="mt-4 divide-y divide-border">
-                {discoveredCompetitors.map((d) => (
-                  <div
-                    key={d.domain}
-                    className="flex items-center justify-between py-2.5"
-                  >
-                    <div>
-                      <p className="font-medium text-card-foreground">{d.domain}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {d.label} · {d.confidence} confidence · cited in{" "}
-                        {d.queries_seen_in} quer
-                        {d.queries_seen_in === 1 ? "y" : "ies"}
-                      </p>
-                    </div>
-                    <span className="text-sm text-muted-foreground">
-                      {d.citation_count}×
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </TabsContent>
-
-        {/* Actions — stub for 4B-2. */}
-        <TabsContent value="actions">
-          <div className="rounded-xl border border-border bg-card p-6">
-            <h3 className="text-lg font-semibold text-card-foreground">
-              Recommended Actions
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              A prioritized roadmap built from per-query suggestions — coming in
-              the next pass.
-            </p>
-          </div>
-        </TabsContent>
-
-        {/* Notes — stub for 4B-2. */}
-        <TabsContent value="notes">
-          <div className="rounded-xl border border-border bg-card p-6">
-            <h3 className="text-lg font-semibold text-card-foreground">
-              Strategic Notes
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Add your strategic close after reviewing the findings — editor
-              coming in the next pass.
-            </p>
-          </div>
         </TabsContent>
       </Tabs>
     </DashboardShell>
