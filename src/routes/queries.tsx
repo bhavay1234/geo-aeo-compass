@@ -213,8 +213,13 @@ function QueryRow({
           </div>
         </div>
         <div className="tm-qr-pos">
-          <PositionDots position={poll.brand_position} />{" "}
-          {poll.brand_position ? `#${poll.brand_position}` : "—"}
+          {poll.brand_position ? (
+            <>
+              <PositionDots position={poll.brand_position} /> #{poll.brand_position}
+            </>
+          ) : (
+            <span style={{ color: "var(--ink-3)" }}>—</span>
+          )}
         </div>
         <div className="tm-qr-srcs mono">{citations.length} cited</div>
         <span className={`tm-badge ${badge.cls === "ba" ? "tm-b-inv" : badge.cls === "bw" ? "tm-b-weak" : "tm-b-held"}`}>

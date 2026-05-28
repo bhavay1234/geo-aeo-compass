@@ -181,7 +181,7 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
                       style={{
                         display: "block",
                         height: "100%",
-                        background: s.isYou ? "var(--you)" : "var(--grid-2)",
+                        background: s.isYou ? "var(--you)" : "var(--ink-3)",
                       }}
                     />
                   </div>
@@ -205,7 +205,7 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
                 <span
                   className="sq"
                   style={{
-                    background: s.isYou ? "var(--you)" : "var(--grid-2)",
+                    background: s.isYou ? "var(--you)" : "var(--ink-3)",
                   }}
                 />
                 <span className="nm">{s.name}</span>

@@ -247,7 +247,7 @@ body:has([data-theme]) { background:var(--bg); color:var(--ink); }
 .tm-q .s{font-size:10.5px;color:var(--ink-3);margin-top:2px;letter-spacing:.02em}
 .tm-q .s b{color:var(--ink-2);font-weight:600}
 .tm-bleed{height:30px;display:flex;align-items:flex-end;gap:0}
-.tm-bleed .cell{flex:1;align-self:stretch}
+.tm-bleed .cell{flex:1;border-radius:1px 1px 0 0}
 .tm-gstate{text-align:right}
 .tm-badge{font-size:9.5px;font-weight:800;letter-spacing:.06em;padding:3px 7px;border-radius:3px;text-transform:uppercase;display:inline-block}
 .tm-b-inv{background:var(--hot-bg);color:var(--hot)}
