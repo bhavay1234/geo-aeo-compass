@@ -35,12 +35,28 @@ export type SourceType =
   | 'editorial'
   | 'other';
 
-/** A web-search citation returned by gpt-4o-search-preview, classified. */
+/** A web-search citation returned by gpt-4o-search-preview, classified (deduped). */
 export interface Citation {
   url: string;
   title: string;
   domain: string;
   source_type: SourceType;
+}
+
+/**
+ * Faithful inline citation: ordered, un-deduped, classified, with the
+ * sentence it anchors to. Powers the "why this source is in the answer"
+ * trail in the UI.
+ */
+export interface InlineCitation {
+  order: number;
+  url: string;
+  title: string;
+  domain: string;
+  source_type: SourceType;
+  start_index: number | null;
+  end_index: number | null;
+  anchor_text: string;
 }
 
 export type SuggestionSituation =
@@ -106,10 +122,14 @@ export interface PollResult {
   query_category: QueryCategory | null;
   llm_source: string;
   raw_response: string | null;
+  full_response: string | null;
   brand_cited: boolean;
   brand_position: number | null;
+  brand_mentioned_uncited: boolean;
   competitors_cited: CompetitorCitation[];
+  competitors_mentioned_uncited: string[];
   citations: Citation[];
+  raw_citations: InlineCitation[];
   suggestion: Suggestion | null;
   created_at: string;
 }

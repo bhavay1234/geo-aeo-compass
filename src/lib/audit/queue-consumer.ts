@@ -4,7 +4,7 @@ import { classifySource, competitorToDomain } from './source-classifier';
 import { buildSuggestion } from './suggestion-engine';
 import { getSupabaseAdmin } from '../db/supabase';
 import { computeSummary, computeInsights, buildInsightHeadline } from './orchestrator';
-import type { Citation } from '../db/types';
+import type { Citation, InlineCitation } from '../db/types';
 import type { Env, AuditQueueMessage } from '../db/supabase';
 
 /**
@@ -13,6 +13,14 @@ import type { Env, AuditQueueMessage } from '../db/supabase';
  */
 export interface QueueMessageLike<T> {
   body: T;
+}
+
+/** Case-insensitive whole-word match. Used for uncited mention detection. */
+function mentionsWord(text: string, word: string): boolean {
+  const w = word.trim();
+  if (!text || !w) return false;
+  const escaped = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${escaped}\\b`, 'i').test(text);
 }
 
 /**
@@ -70,14 +78,20 @@ export async function processQueueBatch(
         // Classify each web-search citation, then build the deterministic
         // per-query suggestion from the classified set + brand result.
         const competitorDomains = competitorList.map(competitorToDomain);
+        const classify = (domain: string) =>
+          classifySource(domain, { brandDomain: audit.domain, competitorDomains });
+
         const enrichedCitations: Citation[] = result.citations.map((c) => ({
           url: c.url,
           title: c.title,
           domain: c.domain,
-          source_type: classifySource(c.domain, {
-            brandDomain: audit.domain,
-            competitorDomains,
-          }),
+          source_type: classify(c.domain),
+        }));
+
+        // Faithful inline trail — ordered, un-deduped, anchor text + source_type.
+        const rawCitations: InlineCitation[] = result.raw_citations.map((rc) => ({
+          ...rc,
+          source_type: classify(rc.domain),
         }));
 
         const suggestion = buildSuggestion({
@@ -86,16 +100,42 @@ export async function processQueueBatch(
           citations: enrichedCitations,
         });
 
+        // Uncited-mention signals: the model named the brand/competitor in the
+        // answer text but no formal citation backed it. Distinct from brand_cited.
+        const fullResponse = result.response_text || '';
+        const brandMentionedUncited =
+          mentionsWord(fullResponse, audit.brand_name) && !citation.brand_cited;
+
+        const citedCompNames = new Set(
+          citation.competitors_cited.map((c) => c.name)
+        );
+        const competitorsMentionedUncited = competitorList.filter(
+          (comp) => mentionsWord(fullResponse, comp) && !citedCompNames.has(comp)
+        );
+
+        console.log(
+          '[raw-cit]',
+          rawCitations.length,
+          'uncited-brand:',
+          brandMentionedUncited,
+          'for',
+          query_text.slice(0, 30)
+        );
+
         await supabase.from('poll_results').insert({
           audit_id,
           query_text,
           query_category,
           llm_source: 'openai',
-          raw_response: (result.response_text || '').slice(0, 5000),
+          raw_response: fullResponse.slice(0, 5000),
+          full_response: fullResponse,
           brand_cited: citation.brand_cited,
           brand_position: citation.brand_position,
+          brand_mentioned_uncited: brandMentionedUncited,
           competitors_cited: citation.competitors_cited,
+          competitors_mentioned_uncited: competitorsMentionedUncited,
           citations: enrichedCitations,
+          raw_citations: rawCitations,
           suggestion,
         });
 
