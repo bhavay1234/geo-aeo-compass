@@ -15,7 +15,7 @@ export default defineConfig({
       // Default is sha256(filename+functionName) → URLs like /_serverFn/<64-char-hash>.
       // Use the human-readable function name instead so URLs are /_serverFn/startAudit.
       // The compiler's name dedup (incrementFunctionNameVersion) handles collisions.
-      generateFunctionId: ({ functionName }) =>
+      generateFunctionId: ({ functionName }: { filename: string; functionName: string }) =>
         functionName.replace(/_createServerFn_handler$/, ""),
     },
   },

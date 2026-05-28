@@ -23,6 +23,53 @@ export interface CategoryStats {
   total: number;
 }
 
+/**
+ * How a cited domain relates to the brand being audited. Drives the
+ * suggestion engine. Classification rules live in source-classifier.ts.
+ */
+export type SourceType =
+  | 'own'
+  | 'competitor'
+  | 'review_directory'
+  | 'analyst'
+  | 'editorial'
+  | 'other';
+
+/** A web-search citation returned by gpt-4o-search-preview, classified. */
+export interface Citation {
+  url: string;
+  title: string;
+  domain: string;
+  source_type: SourceType;
+}
+
+export type SuggestionSituation =
+  | 'winning'
+  | 'weak_position'
+  | 'losing_to_competitor'
+  | 'open_opportunity'
+  | 'authority_gap';
+
+/** Deterministic, per-query recommendation built from citation data. */
+export interface Suggestion {
+  situation: SuggestionSituation;
+  severity: 'low' | 'medium' | 'high';
+  action: string;
+  evidence: string;
+}
+
+/** Aggregate rollup computed at audit completion (audits.insights). */
+export interface AuditInsights {
+  situation_distribution: Record<SuggestionSituation, number>;
+  top_missing_sources: Array<{
+    domain: string;
+    source_type: SourceType;
+    count: number;
+  }>;
+  top_competitors_cited: Array<{ name: string; count: number }>;
+  high_severity_count: number;
+}
+
 export interface AuditSummary {
   headline: string;
   visibility_rate: number;
@@ -45,6 +92,8 @@ export interface Audit {
   progress_done: number;
   visibility_score: number | null;
   summary: AuditSummary | null;
+  insights: AuditInsights | null;
+  notes: string | null;
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
@@ -60,5 +109,7 @@ export interface PollResult {
   brand_cited: boolean;
   brand_position: number | null;
   competitors_cited: CompetitorCitation[];
+  citations: Citation[];
+  suggestion: Suggestion | null;
   created_at: string;
 }

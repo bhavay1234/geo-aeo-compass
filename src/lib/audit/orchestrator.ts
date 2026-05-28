@@ -2,7 +2,16 @@ import { pollChatGPT } from '../llm';
 import { parseCitations } from './citation-parser';
 import { generateQueries, type BuyerQuery } from './query-bank';
 import { getSupabaseAdmin, type Env } from '../db/supabase';
-import type { AuditSummary, PollResult, CategoryStats } from '../db/types';
+import type {
+  AuditSummary,
+  AuditInsights,
+  PollResult,
+  CategoryStats,
+  Citation,
+  Suggestion,
+  SuggestionSituation,
+  CompetitorCitation,
+} from '../db/types';
 
 const BATCH_SIZE = 3;
 
@@ -248,4 +257,108 @@ export async function computeSummary(
     top_winning_queries: winning,
     top_losing_queries: losing,
   };
+}
+
+type PollResultRow = PollResult & {
+  citations: Citation[] | null;
+  suggestion: Suggestion | null;
+};
+
+/**
+ * Aggregate rollup over all poll_results for an audit. Reads the per-query
+ * suggestions + classified citations persisted by the queue consumer and
+ * produces audits.insights. Zero OpenAI calls.
+ */
+export async function computeInsights(
+  auditId: string,
+  env: Env
+): Promise<AuditInsights> {
+  const supabase = getSupabaseAdmin(env);
+
+  const { data: polls } = await supabase
+    .from('poll_results')
+    .select('*')
+    .eq('audit_id', auditId);
+
+  const rows = (polls as PollResultRow[]) || [];
+
+  const situation_distribution: Record<SuggestionSituation, number> = {
+    winning: 0,
+    weak_position: 0,
+    losing_to_competitor: 0,
+    open_opportunity: 0,
+    authority_gap: 0,
+  };
+  let high_severity_count = 0;
+
+  // Domains cited in queries where the brand was NOT cited.
+  const missingSources = new Map<
+    string,
+    { domain: string; source_type: Citation['source_type']; count: number }
+  >();
+  const competitorCounts = new Map<string, number>();
+
+  for (const r of rows) {
+    const suggestion = r.suggestion;
+    if (suggestion) {
+      if (suggestion.situation in situation_distribution) {
+        situation_distribution[suggestion.situation]++;
+      }
+      if (suggestion.severity === 'high') high_severity_count++;
+    }
+
+    if (!r.brand_cited) {
+      const cites = r.citations || [];
+      for (const c of cites) {
+        const existing = missingSources.get(c.domain);
+        if (existing) existing.count++;
+        else
+          missingSources.set(c.domain, {
+            domain: c.domain,
+            source_type: c.source_type,
+            count: 1,
+          });
+      }
+    }
+
+    const comps = (r.competitors_cited || []) as CompetitorCitation[];
+    for (const comp of comps) {
+      competitorCounts.set(comp.name, (competitorCounts.get(comp.name) || 0) + 1);
+    }
+  }
+
+  const top_missing_sources = Array.from(missingSources.values())
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  const top_competitors_cited = Array.from(competitorCounts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
+
+  return {
+    situation_distribution,
+    top_missing_sources,
+    top_competitors_cited,
+    high_severity_count,
+  };
+}
+
+/**
+ * One punchy headline that references the situation distribution. Replaces
+ * the generic summary headline once insights are available.
+ */
+export function buildInsightHeadline(
+  summary: AuditSummary,
+  insights: AuditInsights
+): string {
+  const x = summary.brand_cited_queries;
+  const y = summary.total_queries;
+  const losing = insights.situation_distribution.losing_to_competitor;
+  const open = insights.situation_distribution.open_opportunity;
+
+  if (summary.visibility_rate >= 0.7) {
+    return `Cited in ${x} of ${y} buyer queries — strong AEO position, with ${open} open opportunities to extend.`;
+  }
+  return `Cited in only ${x} of ${y} buyer queries — losing ${losing} to competitors, with ${open} open opportunities.`;
 }

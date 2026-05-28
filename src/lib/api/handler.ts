@@ -110,6 +110,25 @@ export async function handleApiRoute(request: Request): Promise<Response> {
     }
 
 
+    // Operator's strategic note, added after reviewing the auto-generated
+    // per-query suggestions. Wired to the UI in Phase 4.
+    if (path === '/api/audit/notes' && method === 'PATCH') {
+      const body = (await request.json().catch(() => ({}))) as {
+        audit_id?: string;
+        notes?: string;
+      };
+      const auditId = body.audit_id?.trim();
+      if (!auditId) return jsonError(400, 'audit_id is required');
+
+      const { error } = await supabase
+        .from('audits')
+        .update({ notes: body.notes ?? null })
+        .eq('id', auditId);
+
+      if (error) return jsonError(500, `Failed to update notes: ${error.message}`);
+      return Response.json({ ok: true });
+    }
+
     if (path === '/api/audit/status' && method === 'GET') {
       const id = url.searchParams.get('id');
       if (!id?.trim()) return jsonError(400, 'id query param is required');

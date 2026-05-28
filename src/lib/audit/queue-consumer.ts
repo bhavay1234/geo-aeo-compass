@@ -1,7 +1,10 @@
 import { pollChatGPT } from '../llm/openai-client';
 import { parseCitations } from './citation-parser';
+import { classifySource, competitorToDomain } from './source-classifier';
+import { buildSuggestion } from './suggestion-engine';
 import { getSupabaseAdmin } from '../db/supabase';
-import { computeSummary } from './orchestrator';
+import { computeSummary, computeInsights, buildInsightHeadline } from './orchestrator';
+import type { Citation } from '../db/types';
 import type { Env, AuditQueueMessage } from '../db/supabase';
 
 /**
@@ -47,13 +50,41 @@ export async function processQueueBatch(
           return;
         }
 
+        const competitorList = (audit.competitors as string[]) || [];
+
         const result = await pollChatGPT(query_text, env);
+        console.log(
+          '[citations]',
+          result.citations.length,
+          'for',
+          query_text.slice(0, 40)
+        );
+
         const citation = parseCitations(
           result.response_text,
           audit.brand_name,
           audit.domain,
-          (audit.competitors as string[]) || []
+          competitorList
         );
+
+        // Classify each web-search citation, then build the deterministic
+        // per-query suggestion from the classified set + brand result.
+        const competitorDomains = competitorList.map(competitorToDomain);
+        const enrichedCitations: Citation[] = result.citations.map((c) => ({
+          url: c.url,
+          title: c.title,
+          domain: c.domain,
+          source_type: classifySource(c.domain, {
+            brandDomain: audit.domain,
+            competitorDomains,
+          }),
+        }));
+
+        const suggestion = buildSuggestion({
+          brand_cited: citation.brand_cited,
+          brand_position: citation.brand_position,
+          citations: enrichedCitations,
+        });
 
         await supabase.from('poll_results').insert({
           audit_id,
@@ -64,6 +95,8 @@ export async function processQueueBatch(
           brand_cited: citation.brand_cited,
           brand_position: citation.brand_position,
           competitors_cited: citation.competitors_cited,
+          citations: enrichedCitations,
+          suggestion,
         });
 
         // Atomic counter bump via Postgres function — avoids the read/write
@@ -104,6 +137,9 @@ export async function processQueueBatch(
       (audit.competitors as string[]) || [],
       env
     );
+    const insights = await computeInsights(auditId, env);
+    // Upgrade the headline to reference the situation distribution.
+    summary.headline = buildInsightHeadline(summary, insights);
     const visibilityScore = Math.round((summary.visibility_rate ?? 0) * 100);
 
     await supabase
@@ -112,6 +148,7 @@ export async function processQueueBatch(
         status: 'completed',
         visibility_score: visibilityScore,
         summary,
+        insights,
         completed_at: new Date().toISOString(),
       })
       .eq('id', auditId);
