@@ -3,7 +3,12 @@ import { parseCitations } from './citation-parser';
 import { classifySource, competitorToDomain } from './source-classifier';
 import { buildSuggestion } from './suggestion-engine';
 import { getSupabaseAdmin } from '../db/supabase';
-import { computeSummary, computeInsights, buildInsightHeadline } from './orchestrator';
+import {
+  computeSummary,
+  computeInsights,
+  computeDiscoveredCompetitors,
+  buildInsightHeadline,
+} from './orchestrator';
 import type { Citation, InlineCitation } from '../db/types';
 import type { Env, AuditQueueMessage } from '../db/supabase';
 
@@ -171,14 +176,30 @@ export async function processQueueBatch(
     if (audit.status === 'completed' || audit.status === 'failed') continue;
     if ((audit.progress_done ?? 0) < (audit.progress_total ?? 0)) continue;
 
+    const competitors = (audit.competitors as string[]) || [];
     const summary = await computeSummary(
       auditId,
       audit.brand_name,
-      (audit.competitors as string[]) || [],
+      competitors,
       env
     );
     const insights = await computeInsights(auditId, env);
-    // Upgrade the headline to reference the situation distribution.
+
+    // Discovered competitors: one cheap gpt-4o-mini call labeling the top
+    // unnamed domains ChatGPT cited. Feeds the discovered_competitor_count
+    // that the headline leads with when > 0.
+    const discoveredCompetitors = await computeDiscoveredCompetitors(
+      auditId,
+      audit.brand_name,
+      audit.domain,
+      competitors,
+      audit.category,
+      env
+    );
+    insights.discovered_competitor_count = discoveredCompetitors.filter(
+      (d) => d.label === 'competitor'
+    ).length;
+
     summary.headline = buildInsightHeadline(summary, insights);
     const visibilityScore = Math.round((summary.visibility_rate ?? 0) * 100);
 
@@ -189,6 +210,7 @@ export async function processQueueBatch(
         visibility_score: visibilityScore,
         summary,
         insights,
+        discovered_competitors: discoveredCompetitors,
         completed_at: new Date().toISOString(),
       })
       .eq('id', auditId);

@@ -45,7 +45,7 @@ export const COMPETITOR_DOMAIN_ALIASES: Record<string, string> = {
   shippeo: 'shippeo.com',
 };
 
-function normalizeDomain(domain: string): string {
+export function normalizeDomain(domain: string): string {
   return domain
     .toLowerCase()
     .trim()

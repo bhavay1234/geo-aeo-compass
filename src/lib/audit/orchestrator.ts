@@ -1,6 +1,8 @@
 import { pollChatGPT } from '../llm';
 import { parseCitations } from './citation-parser';
 import { generateQueries, type BuyerQuery } from './query-bank';
+import { competitorToDomain, normalizeDomain } from './source-classifier';
+import { classifyDiscoveredDomains } from '../llm/domain-classifier';
 import { getSupabaseAdmin, type Env } from '../db/supabase';
 import type {
   AuditSummary,
@@ -11,6 +13,7 @@ import type {
   Suggestion,
   SuggestionSituation,
   CompetitorCitation,
+  DiscoveredCompetitor,
 } from '../db/types';
 
 const BATCH_SIZE = 3;
@@ -341,7 +344,122 @@ export async function computeInsights(
     top_missing_sources,
     top_competitors_cited,
     high_severity_count,
+    // Distinct NAMED competitors that actually appeared in any answer.
+    named_competitor_count: competitorCounts.size,
+    // Filled at finalization once discovered competitors are classified.
+    discovered_competitor_count: 0,
   };
+}
+
+type CitationRow = { query_text: string; citations: Citation[] | null };
+
+/**
+ * Discovered competitors: unnamed domains ChatGPT repeatedly cites that the
+ * user never listed. Aggregates citation domains across all poll_results,
+ * excludes own/named-competitor/known-source-type domains, takes the top 8
+ * by reach, and runs ONE gpt-4o-mini classification call to label them.
+ * Returns [] (no LLM call) if there are no candidates.
+ */
+export async function computeDiscoveredCompetitors(
+  auditId: string,
+  brandName: string,
+  brandDomain: string,
+  competitors: string[],
+  category: string | null,
+  env: Env
+): Promise<DiscoveredCompetitor[]> {
+  const supabase = getSupabaseAdmin(env);
+
+  const { data: polls } = await supabase
+    .from('poll_results')
+    .select('query_text, citations')
+    .eq('audit_id', auditId);
+
+  const rows = (polls as CitationRow[]) || [];
+
+  const domainStats = new Map<
+    string,
+    {
+      domain: string;
+      source_type: Citation['source_type'];
+      citation_count: number;
+      queries: Set<string>;
+      sample_url: string;
+    }
+  >();
+
+  for (const row of rows) {
+    for (const c of row.citations || []) {
+      const existing = domainStats.get(c.domain);
+      if (existing) {
+        existing.citation_count++;
+        existing.queries.add(row.query_text);
+      } else {
+        domainStats.set(c.domain, {
+          domain: c.domain,
+          source_type: c.source_type,
+          citation_count: 1,
+          queries: new Set([row.query_text]),
+          sample_url: c.url,
+        });
+      }
+    }
+  }
+
+  const brandNorm = normalizeDomain(brandDomain);
+  const competitorDomainSet = new Set(
+    competitors.map((c) => normalizeDomain(competitorToDomain(c))).filter(Boolean)
+  );
+  const KNOWN_SOURCE_TYPES = new Set(['review_directory', 'analyst', 'editorial']);
+
+  const candidates = Array.from(domainStats.values()).filter((s) => {
+    const d = normalizeDomain(s.domain);
+    if (brandNorm && (d === brandNorm || d.endsWith('.' + brandNorm))) return false;
+    if (competitorDomainSet.has(d)) return false;
+    if (s.source_type === 'own' || s.source_type === 'competitor') return false;
+    if (KNOWN_SOURCE_TYPES.has(s.source_type)) return false;
+    return true;
+  });
+
+  candidates.sort((a, b) => {
+    const byQueries = b.queries.size - a.queries.size;
+    if (byQueries !== 0) return byQueries;
+    return b.citation_count - a.citation_count;
+  });
+
+  const top = candidates.slice(0, 8);
+
+  if (top.length < 1) {
+    console.log('[discovered] 0 candidates for audit', auditId);
+    return [];
+  }
+
+  const labels = await classifyDiscoveredDomains(
+    top.map((t) => ({ domain: t.domain, sample_url: t.sample_url })),
+    brandName,
+    category,
+    env
+  );
+
+  const discovered: DiscoveredCompetitor[] = top.map((t) => ({
+    domain: t.domain,
+    citation_count: t.citation_count,
+    queries_seen_in: t.queries.size,
+    label: labels[t.domain] ?? 'other',
+    sample_url: t.sample_url,
+  }));
+
+  const labeledCompetitors = discovered.filter((d) => d.label === 'competitor').length;
+  console.log(
+    '[discovered]',
+    candidates.length,
+    'candidates,',
+    labeledCompetitors,
+    'labeled competitor for audit',
+    auditId
+  );
+
+  return discovered;
 }
 
 /**
@@ -354,6 +472,16 @@ export function buildInsightHeadline(
 ): string {
   const x = summary.brand_cited_queries;
   const y = summary.total_queries;
+  const discovered = insights.discovered_competitor_count;
+
+  // Discovered (unnamed) competitors are the most compelling finding —
+  // lead with them when present.
+  if (discovered > 0) {
+    const brands = discovered === 1 ? 'brand' : 'brands';
+    const verb = discovered === 1 ? 'is' : 'are';
+    return `Cited in only ${x} of ${y} buyer queries — and ${discovered} ${brands} you didn't name ${verb} winning these answers.`;
+  }
+
   const losing = insights.situation_distribution.losing_to_competitor;
   const open = insights.situation_distribution.open_opportunity;
 

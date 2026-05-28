@@ -74,6 +74,18 @@ export interface Suggestion {
   evidence: string;
 }
 
+/** Best-guess role of a domain ChatGPT cited that the user didn't name. */
+export type DiscoveredLabel = 'competitor' | 'aggregator' | 'editorial' | 'other';
+
+/** An unnamed brand/domain ChatGPT repeatedly cites — a competitor the user may not know about. */
+export interface DiscoveredCompetitor {
+  domain: string;
+  citation_count: number;
+  queries_seen_in: number;
+  label: DiscoveredLabel;
+  sample_url: string;
+}
+
 /** Aggregate rollup computed at audit completion (audits.insights). */
 export interface AuditInsights {
   situation_distribution: Record<SuggestionSituation, number>;
@@ -84,6 +96,10 @@ export interface AuditInsights {
   }>;
   top_competitors_cited: Array<{ name: string; count: number }>;
   high_severity_count: number;
+  // How many of the user's NAMED competitors actually appeared in answers.
+  named_competitor_count: number;
+  // How many DISCOVERED (unnamed) domains the LLM labeled 'competitor'.
+  discovered_competitor_count: number;
 }
 
 export interface AuditSummary {
@@ -109,6 +125,7 @@ export interface Audit {
   visibility_score: number | null;
   summary: AuditSummary | null;
   insights: AuditInsights | null;
+  discovered_competitors: DiscoveredCompetitor[];
   notes: string | null;
   error_message: string | null;
   created_at: string;
