@@ -2,12 +2,13 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { DashboardShell } from "@/components/DashboardShell";
 import { StatCard } from "@/components/StatCard";
-import { QueryTable } from "@/components/QueryTable";
+import { QueryTable, type QueryTableRow } from "@/components/QueryTable";
 import { PlatformBreakdown } from "@/components/PlatformBreakdown";
 import { AuditStatusBadge } from "@/components/AuditStatusBadge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { getAuditStatus, getAuditResult } from "@/lib/client/api";
 import type { PollResult } from "@/lib/db/types";
 import {
@@ -183,90 +184,176 @@ function AuditDetail() {
   const score = full.visibility_score ?? 0;
   const { total, cited, avgPosition } = computeStats(polls);
   const highSeverity = full.insights?.high_severity_count ?? 0;
+  const ownDomain = full.domain;
+  const namedCompetitors = full.competitors ?? [];
+  const discoveredCompetitors = full.discovered_competitors ?? [];
+
+  // Shared per-query rows for both Overview and Query Results tabs.
+  const queryRows: QueryTableRow[] = polls.map((p) => ({
+    query_text: p.query_text,
+    brand_cited: p.brand_cited,
+    brand_position: p.brand_position,
+    competitors_cited: p.competitors_cited ?? [],
+    discovered_in_query: p.discovered_in_query ?? [],
+  }));
 
   return (
     <DashboardShell>
       {backButton}
-      <div className="space-y-6">
-        {/* Hero score */}
-        <div className="rounded-2xl border border-border bg-card p-8">
-          <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="mb-2 flex items-center gap-2 text-sm text-muted-foreground">
-                <span className="font-medium text-card-foreground">
-                  {full.brand_name}
-                </span>
-                <span>·</span>
-                <span>{full.domain}</span>
-                <span>·</span>
-                <span>ChatGPT</span>
-                <AuditStatusBadge status={full.status} />
-              </div>
-              <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                AI Visibility Score
-              </p>
-              {full.summary?.headline && (
-                <p className="mt-3 max-w-2xl text-lg text-card-foreground">
-                  {full.summary.headline}
-                </p>
-              )}
-            </div>
-            <div className="shrink-0 text-right">
-              <div className="flex items-baseline justify-end gap-1">
-                <span className={`text-6xl font-bold tracking-tight ${scoreColor(score)}`}>
-                  {score}
-                </span>
-                <span className="text-2xl text-muted-foreground"> / 100</span>
-              </div>
-            </div>
-          </div>
-        </div>
 
-        {/* Stat row */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            title="Visibility Score"
-            value={`${score}`}
-            icon={Eye}
-            description="out of 100"
-          />
-          <StatCard
-            title="Queries Cited"
-            value={`${cited} / ${total}`}
-            icon={CheckCircle2}
-            description="brand appeared in answer"
-          />
-          <StatCard
-            title="Avg. Position"
-            value={`${avgPosition}`}
-            icon={Crosshair}
-            description="when cited"
-          />
-          <StatCard
-            title="High-Severity Issues"
-            value={`${highSeverity}`}
-            icon={AlertTriangle}
-            description="need attention"
-          />
-        </div>
-
-        {/* Query table + platform breakdown */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="lg:col-span-2">
-            <QueryTable
-              polls={polls.map((p) => ({
-                query_text: p.query_text,
-                brand_cited: p.brand_cited,
-                brand_position: p.brand_position,
-                competitors_cited: p.competitors_cited ?? [],
-              }))}
-            />
-          </div>
+      {/* Hero score — shown above the tabs */}
+      <div className="mb-6 rounded-2xl border border-border bg-card p-8">
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <PlatformBreakdown cited={cited} total={total} />
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span className="font-medium text-card-foreground">
+                {full.brand_name}
+              </span>
+              <span>·</span>
+              <span>{full.domain}</span>
+              <span>·</span>
+              <span>ChatGPT</span>
+              <AuditStatusBadge status={full.status} />
+            </div>
+            <p className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+              AI Visibility Score
+            </p>
+            {full.summary?.headline && (
+              <p className="mt-3 max-w-2xl text-lg text-card-foreground">
+                {full.summary.headline}
+              </p>
+            )}
+          </div>
+          <div className="shrink-0 text-right">
+            <div className="flex items-baseline justify-end gap-1">
+              <span className={`text-6xl font-bold tracking-tight ${scoreColor(score)}`}>
+                {score}
+              </span>
+              <span className="text-2xl text-muted-foreground"> / 100</span>
+            </div>
           </div>
         </div>
       </div>
+
+      <Tabs defaultValue="overview" className="w-full">
+        <TabsList className="mb-4 flex-wrap">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="queries">Query Results</TabsTrigger>
+          <TabsTrigger value="competitors">Competitors</TabsTrigger>
+          <TabsTrigger value="actions">Actions</TabsTrigger>
+          <TabsTrigger value="notes">Notes</TabsTrigger>
+        </TabsList>
+
+        {/* Overview */}
+        <TabsContent value="overview" className="space-y-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard title="Visibility Score" value={`${score}`} icon={Eye} description="out of 100" />
+            <StatCard
+              title="Queries Cited"
+              value={`${cited} / ${total}`}
+              icon={CheckCircle2}
+              description="brand appeared in answer"
+            />
+            <StatCard title="Avg. Position" value={`${avgPosition}`} icon={Crosshair} description="when cited" />
+            <StatCard
+              title="High-Severity Issues"
+              value={`${highSeverity}`}
+              icon={AlertTriangle}
+              description="need attention"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-2">
+              <QueryTable
+                polls={queryRows}
+                ownDomain={ownDomain}
+                namedCompetitors={namedCompetitors}
+              />
+            </div>
+            <div>
+              <PlatformBreakdown cited={cited} total={total} />
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* Query Results — full width, no donut. 4B-2: per-query expand goes here. */}
+        <TabsContent value="queries">
+          <QueryTable
+            polls={queryRows}
+            ownDomain={ownDomain}
+            namedCompetitors={namedCompetitors}
+          />
+          {/* TODO(4B-2): expandable rows — citation evidence (raw_citations +
+              anchor_text), full_response, per-query suggestion, uncited
+              mentions. */}
+        </TabsContent>
+
+        {/* Competitors — minimal stub; 4B-2 builds the real panel. */}
+        <TabsContent value="competitors">
+          <div className="rounded-xl border border-border bg-card p-6">
+            <h3 className="text-lg font-semibold text-card-foreground">
+              Discovered Competitors
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Brands ChatGPT cited that you didn't name. Full breakdown coming
+              in the next pass.
+            </p>
+            {discoveredCompetitors.length === 0 ? (
+              <p className="mt-4 text-sm text-muted-foreground">
+                None discovered for this audit.
+              </p>
+            ) : (
+              <div className="mt-4 divide-y divide-border">
+                {discoveredCompetitors.map((d) => (
+                  <div
+                    key={d.domain}
+                    className="flex items-center justify-between py-2.5"
+                  >
+                    <div>
+                      <p className="font-medium text-card-foreground">{d.domain}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {d.label} · {d.confidence} confidence · cited in{" "}
+                        {d.queries_seen_in} quer
+                        {d.queries_seen_in === 1 ? "y" : "ies"}
+                      </p>
+                    </div>
+                    <span className="text-sm text-muted-foreground">
+                      {d.citation_count}×
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        {/* Actions — stub for 4B-2. */}
+        <TabsContent value="actions">
+          <div className="rounded-xl border border-border bg-card p-6">
+            <h3 className="text-lg font-semibold text-card-foreground">
+              Recommended Actions
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              A prioritized roadmap built from per-query suggestions — coming in
+              the next pass.
+            </p>
+          </div>
+        </TabsContent>
+
+        {/* Notes — stub for 4B-2. */}
+        <TabsContent value="notes">
+          <div className="rounded-xl border border-border bg-card p-6">
+            <h3 className="text-lg font-semibold text-card-foreground">
+              Strategic Notes
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Add your strategic close after reviewing the findings — editor
+              coming in the next pass.
+            </p>
+          </div>
+        </TabsContent>
+      </Tabs>
     </DashboardShell>
   );
 }

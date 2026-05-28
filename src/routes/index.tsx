@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
@@ -48,7 +48,9 @@ function Index() {
   const [queries, setQueries] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  const queryCount = useMemo(() => splitLines(queries).length, [queries]);
+  // Computed on every render from the controlled value, so it reflects
+  // pastes and programmatic changes immediately, not just keystrokes.
+  const queryCount = splitLines(queries).length;
 
   const recentQuery = useQuery({
     queryKey: ["recent-audits"],

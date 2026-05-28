@@ -8,14 +8,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CheckCircle2, XCircle, AlertCircle } from "lucide-react";
-import type { CompetitorCitation } from "@/lib/db/types";
+import { CitedBrands, CitedBrandsLegend } from "@/components/CitedBrands";
+import type { CompetitorCitation, DiscoveredInQuery } from "@/lib/db/types";
 
-/** Per-query row shape for a real audit (subset of PollResult used in 4A). */
+/** Per-query row shape for a real audit. */
 export interface QueryTableRow {
   query_text: string;
   brand_cited: boolean;
   brand_position: number | null;
   competitors_cited: CompetitorCitation[];
+  discovered_in_query: DiscoveredInQuery[];
 }
 
 const queries = [
@@ -77,12 +79,20 @@ const queries = [
   },
 ];
 
-export function QueryTable({ polls }: { polls?: QueryTableRow[] }) {
+export function QueryTable({
+  polls,
+  ownDomain = "",
+  namedCompetitors = [],
+}: {
+  polls?: QueryTableRow[];
+  ownDomain?: string;
+  namedCompetitors?: string[];
+}) {
   // Audit mode: render real per-query results.
   if (polls) {
     return (
       <div className="rounded-xl border border-border bg-card p-6">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <h3 className="text-lg font-semibold text-card-foreground">
               Query Results
@@ -92,19 +102,23 @@ export function QueryTable({ polls }: { polls?: QueryTableRow[] }) {
               was cited
             </p>
           </div>
-          <span className="text-sm text-muted-foreground">
+          <span className="shrink-0 text-sm text-muted-foreground">
             {polls.length} queries
           </span>
+        </div>
+
+        <div className="mb-4">
+          <CitedBrandsLegend />
         </div>
 
         <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[48%]">Query</TableHead>
+                <TableHead className="w-[44%]">Query</TableHead>
                 <TableHead>Cited</TableHead>
                 <TableHead>Position</TableHead>
-                <TableHead>Competitors cited</TableHead>
+                <TableHead>Brands cited</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -140,21 +154,12 @@ export function QueryTable({ polls }: { polls?: QueryTableRow[] }) {
                       {p.brand_position ?? "—"}
                     </TableCell>
                     <TableCell>
-                      {p.competitors_cited.length === 0 ? (
-                        <span className="text-muted-foreground">—</span>
-                      ) : (
-                        <div className="flex flex-wrap gap-1">
-                          {p.competitors_cited.map((c, ci) => (
-                            <Badge
-                              key={ci}
-                              variant="outline"
-                              className="border-muted-foreground/30 bg-muted text-muted-foreground"
-                            >
-                              {c.name}
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
+                      <CitedBrands
+                        competitorsCited={p.competitors_cited}
+                        discoveredInQuery={p.discovered_in_query}
+                        ownDomain={ownDomain}
+                        namedCompetitors={namedCompetitors}
+                      />
                     </TableCell>
                   </TableRow>
                 ))
