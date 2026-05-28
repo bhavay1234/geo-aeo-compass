@@ -4,8 +4,8 @@ import type { LucideIcon } from "lucide-react";
 interface StatCardProps {
   title: string;
   value: string;
-  change: string;
-  changeType: "positive" | "negative" | "neutral";
+  change?: string;
+  changeType?: "positive" | "negative" | "neutral";
   icon: LucideIcon;
   description?: string;
 }
@@ -14,7 +14,7 @@ export function StatCard({
   title,
   value,
   change,
-  changeType,
+  changeType = "neutral",
   icon: Icon,
   description,
 }: StatCardProps) {
@@ -34,19 +34,21 @@ export function StatCard({
           <Icon className="h-5 w-5 text-primary" />
         </div>
       </div>
-      <div className="mt-4 flex items-center gap-1.5">
-        <span
-          className={cn(
-            "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-            changeType === "positive" && "bg-success/10 text-success",
-            changeType === "negative" && "bg-destructive/10 text-destructive",
-            changeType === "neutral" && "bg-muted text-muted-foreground"
-          )}
-        >
-          {change}
-        </span>
-        <span className="text-xs text-muted-foreground">vs last month</span>
-      </div>
+      {change && (
+        <div className="mt-4 flex items-center gap-1.5">
+          <span
+            className={cn(
+              "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
+              changeType === "positive" && "bg-success/10 text-success",
+              changeType === "negative" && "bg-destructive/10 text-destructive",
+              changeType === "neutral" && "bg-muted text-muted-foreground"
+            )}
+          >
+            {change}
+          </span>
+          <span className="text-xs text-muted-foreground">vs last month</span>
+        </div>
+      )}
     </div>
   );
 }

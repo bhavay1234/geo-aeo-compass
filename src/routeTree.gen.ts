@@ -15,6 +15,7 @@ import { Route as CompetitorsRouteImport } from './routes/competitors'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as ActionsRouteImport } from './routes/actions'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuditIdRouteImport } from './routes/audit.$id'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -46,6 +47,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuditIdRoute = AuditIdRouteImport.update({
+  id: '/audit/$id',
+  path: '/audit/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/competitors': typeof CompetitorsRoute
   '/queries': typeof QueriesRoute
   '/settings': typeof SettingsRoute
+  '/audit/$id': typeof AuditIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +69,7 @@ export interface FileRoutesByTo {
   '/competitors': typeof CompetitorsRoute
   '/queries': typeof QueriesRoute
   '/settings': typeof SettingsRoute
+  '/audit/$id': typeof AuditIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,6 +79,7 @@ export interface FileRoutesById {
   '/competitors': typeof CompetitorsRoute
   '/queries': typeof QueriesRoute
   '/settings': typeof SettingsRoute
+  '/audit/$id': typeof AuditIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -81,6 +90,7 @@ export interface FileRouteTypes {
     | '/competitors'
     | '/queries'
     | '/settings'
+    | '/audit/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -89,6 +99,7 @@ export interface FileRouteTypes {
     | '/competitors'
     | '/queries'
     | '/settings'
+    | '/audit/$id'
   id:
     | '__root__'
     | '/'
@@ -97,6 +108,7 @@ export interface FileRouteTypes {
     | '/competitors'
     | '/queries'
     | '/settings'
+    | '/audit/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -106,6 +118,7 @@ export interface RootRouteChildren {
   CompetitorsRoute: typeof CompetitorsRoute
   QueriesRoute: typeof QueriesRoute
   SettingsRoute: typeof SettingsRoute
+  AuditIdRoute: typeof AuditIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -152,6 +165,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/audit/$id': {
+      id: '/audit/$id'
+      path: '/audit/$id'
+      fullPath: '/audit/$id'
+      preLoaderRoute: typeof AuditIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -162,6 +182,7 @@ const rootRouteChildren: RootRouteChildren = {
   CompetitorsRoute: CompetitorsRoute,
   QueriesRoute: QueriesRoute,
   SettingsRoute: SettingsRoute,
+  AuditIdRoute: AuditIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
