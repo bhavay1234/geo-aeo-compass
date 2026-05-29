@@ -48,8 +48,14 @@ async function loadCache(
 ): Promise<Map<string, CachedPage>> {
   const out = new Map<string, CachedPage>();
   if (urls.length === 0) return out;
-  const { data } = await supabase.from('citation_pages').select('*').in('url', urls);
-  for (const r of (data as any[]) || []) {
+  let data: any[] | null = null;
+  try {
+    ({ data } = await supabase.from('citation_pages').select('*').in('url', urls));
+  } catch (e: any) {
+    console.error('[citations] cache read failed (degrading to fetch):', e?.message);
+    return out;
+  }
+  for (const r of data || []) {
     const fetchedAt = r.fetched_at ? new Date(r.fetched_at).getTime() : 0;
     if (Date.now() - fetchedAt > CACHE_TTL_MS) continue;
     out.set(r.url, {
@@ -90,7 +96,11 @@ async function upsertCache(supabase: SupabaseClient, pages: ExtractedPage[]): Pr
     analyzed_via: p.signals.analyzed_via,
     fetched_at: new Date().toISOString(),
   }));
-  await supabase.from('citation_pages').upsert(rows, { onConflict: 'url' });
+  try {
+    await supabase.from('citation_pages').upsert(rows, { onConflict: 'url' });
+  } catch (e: any) {
+    console.error('[citations] cache write failed (non-fatal):', e?.message);
+  }
 }
 
 /** Fresh cache → plain fetch → ONE batched cheerio fallback for failures. */
@@ -190,6 +200,24 @@ function bestOwnPage(query: string, candidates: CrawledPage[]): CrawledPage | nu
   return score > 0 ? best : null;
 }
 
+/** Best-effort citation_status write — never throws (a missing column / DB
+ *  error is logged, not propagated), so the terminal-state guard can't fail. */
+async function setStatus(
+  supabase: SupabaseClient,
+  auditId: string,
+  status: 'analyzing' | 'done'
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from('audits')
+      .update({ citation_status: status })
+      .eq('id', auditId);
+    if (error) console.error(`[citations] setStatus(${status}) error:`, error.message);
+  } catch (e: any) {
+    console.error(`[citations] setStatus(${status}) threw:`, e?.message);
+  }
+}
+
 // ── main ─────────────────────────────────────────────────────────────────
 
 /**
@@ -212,6 +240,11 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   const brandDomain: string = audit.domain;
   const ownNorm = normalizeDomain(brandDomain);
 
+  // Terminal-state guard: mark 'analyzing' up front and ALWAYS finish at 'done'
+  // in finally — a thrown Apify / verdict / DB error can never leave the stage
+  // stuck on 'analyzing' (or null) and hang the UI.
+  await setStatus(supabase, auditId, 'analyzing');
+  try {
   const { data: pollData } = await supabase
     .from('poll_results')
     .select('id, query_text, citations, citation_roles, competitors_cited, brands_named')
@@ -258,7 +291,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
 
   await supabase
     .from('audits')
-    .update({ citation_analysis: analysis, citation_status: 'analyzing' })
+    .update({ citation_analysis: analysis })
     .eq('id', auditId);
 
   // Brands we'll analyze (top-N named per query, deduped across the audit).
@@ -396,10 +429,16 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     })
   );
 
-  await supabase.from('audits').update({ citation_status: 'done' }).eq('id', auditId);
-  console.log(
-    `[citations] audit ${auditId} — ${analysis.length} sources, ` +
-      `${analysis.filter((a) => a.brand_present).length} naming you, ` +
-      `${analyzedBrands.size} brands analyzed`
-  );
+    console.log(
+      `[citations] audit ${auditId} — ${analysis.length} sources, ` +
+        `${analysis.filter((a) => a.brand_present).length} naming you, ` +
+        `${analyzedBrands.size} brands analyzed`
+    );
+  } catch (err: any) {
+    console.error('[citations] analysis failed — finishing with partial data:', err?.message || err);
+  } finally {
+    // Guaranteed terminal state: the UI keys off citation_status === 'done', so
+    // we always land there even on partial failure (partial data is kept).
+    await setStatus(supabase, auditId, 'done');
+  }
 }

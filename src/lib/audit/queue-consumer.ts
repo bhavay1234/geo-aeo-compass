@@ -182,29 +182,55 @@ export async function processQueueBatch(
       .single();
 
     if (!audit) continue;
-    if (audit.status === 'completed' || audit.status === 'failed') continue;
-    if ((audit.progress_done ?? 0) < (audit.progress_total ?? 0)) continue;
 
-    // Two-phase finalize. FAST: a CAS claim (running → finalizing) flips the
-    // audit to 'completed' with deterministic data so the UI unblocks
-    // immediately — only the CAS winner proceeds (no double-finalize). ENRICH:
-    // the LLM step (positioning + per-query suggestions + competitor
-    // reclassification) patches the rows in place; the UI upgrades tiers live.
-    const claimed = await finalizeAuditFast(auditId, env);
-    if (claimed) {
-      await enrichAudit(auditId, env);
-      // Kick off citation analysis in its own queue invocation — enrich has
-      // written citation_roles by now, which the vendor/competitor split needs.
-      try {
-        await env.AUDIT_QUEUE.send({
-          audit_id: auditId,
-          query_text: '',
-          query_category: '',
-          query_index: -1,
-          kind: 'citations',
-        });
-      } catch (err: any) {
-        console.error(`[queue] failed to enqueue citations for ${auditId}:`, err?.message || err);
+    // Finalize only while still running and fully polled. FAST CAS claim flips
+    // the audit to 'completed' (UI unblocks); the winner runs ENRICH, which
+    // writes positioning + brands_named + citation_roles that citation analysis
+    // depends on.
+    if (
+      audit.status !== 'completed' &&
+      audit.status !== 'failed' &&
+      (audit.progress_done ?? 0) >= (audit.progress_total ?? 0)
+    ) {
+      const claimed = await finalizeAuditFast(auditId, env);
+      if (claimed) await enrichAudit(auditId, env);
+    }
+
+    // Citation analysis enqueue — DECOUPLED from the CAS win. Fires once per
+    // audit via an idempotent CAS on citation_status IS NULL, as soon as enrich
+    // has landed (positioning set), no matter which invocation finalized it.
+    // Must run after enrich because the analysis reads brands_named.
+    const { data: cur } = await supabase
+      .from('audits')
+      .select('status, positioning, citation_status')
+      .eq('id', auditId)
+      .single();
+    if (
+      cur &&
+      cur.status === 'completed' &&
+      cur.positioning != null &&
+      cur.citation_status == null
+    ) {
+      const { data: claimedCit } = await supabase
+        .from('audits')
+        .update({ citation_status: 'analyzing' })
+        .eq('id', auditId)
+        .is('citation_status', null)
+        .select('id');
+      if (claimedCit && claimedCit.length > 0) {
+        try {
+          await env.AUDIT_QUEUE.send({
+            audit_id: auditId,
+            query_text: '',
+            query_category: '',
+            query_index: -1,
+            kind: 'citations',
+          });
+        } catch (err: any) {
+          console.error(`[queue] failed to enqueue citations for ${auditId}:`, err?.message || err);
+          // Release the claim so a later pass can retry the enqueue.
+          await supabase.from('audits').update({ citation_status: null }).eq('id', auditId);
+        }
       }
     }
   }
