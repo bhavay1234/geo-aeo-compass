@@ -27,6 +27,8 @@ import type {
 } from '../db/types';
 
 const BATCH_SIZE = 3;
+/** Max brand-verdict LLM calls per enrich invocation — bounds subrequest fan-out. */
+const VERDICT_CAP = 8;
 
 /**
  * Runs an audit end-to-end inside a single Cloudflare Worker invocation:
@@ -753,6 +755,42 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       .update({ positioning: positioning ?? '', category: category || null })
       .eq('id', auditId);
 
+    // CITATIONS ENQUEUE — fire BEFORE the verdict fan-out (fix C). positioning +
+    // brands_named + citation_roles are now written (all the analysis needs), and
+    // the queue.send still has subrequest budget (the verdict calls below can
+    // exhaust it). The citations stage runs in its OWN invocation with a fresh
+    // budget. Idempotent CAS on citation_status IS NULL. On send failure, mark
+    // 'failed' (terminal) so the UI never hangs on 'analyzing'.
+    try {
+      const { data: claimedCit } = await supabase
+        .from('audits')
+        .update({ citation_status: 'analyzing' })
+        .eq('id', auditId)
+        .is('citation_status', null)
+        .select('id');
+      if (claimedCit && claimedCit.length > 0) {
+        await env.AUDIT_QUEUE.send({
+          audit_id: auditId,
+          query_text: '',
+          query_category: '',
+          query_index: -1,
+          kind: 'citations',
+        });
+        console.log(`[enrich] enqueued citations for ${auditId}`);
+      }
+    } catch (err: any) {
+      console.error(
+        `[enrich] citations enqueue failed for ${auditId}:`,
+        JSON.stringify({
+          audit_queue_present: typeof env.AUDIT_QUEUE,
+          name: err?.name,
+          message: err?.message,
+          cause: err?.cause?.message ?? (err?.cause != null ? String(err.cause) : undefined),
+        })
+      );
+      await supabase.from('audits').update({ citation_status: 'failed' }).eq('id', auditId);
+    }
+
     // Brand verdicts — "what is X?" for the user's brand + each profiled
     // competitor (named + discovered). Fired in parallel; failures fall back ''.
     const verdictTargets: Array<{ name: string; domain: string | null; isYou: boolean }> = [
@@ -775,12 +813,47 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       seenV.add(k);
       return true;
     });
+    // Cap verdict fan-out (fix A) — the brand always, then the most-mentioned
+    // competitors, up to VERDICT_CAP total. Bounds subrequests per invocation.
+    const mentionCount = new Map<string, number>();
+    for (const { llm } of perQuery)
+      for (const b of llm?.brandsNamed ?? []) {
+        const k = b.trim().toLowerCase();
+        if (k) mentionCount.set(k, (mentionCount.get(k) ?? 0) + 1);
+      }
+    const ranked = targets.slice().sort((a, b) => {
+      if (a.isYou !== b.isYou) return a.isYou ? -1 : 1;
+      return (
+        (mentionCount.get(b.name.toLowerCase()) ?? 1) -
+        (mentionCount.get(a.name.toLowerCase()) ?? 1)
+      );
+    });
+    const capped = ranked.slice(0, VERDICT_CAP);
+    if (ranked.length > capped.length) {
+      console.log(
+        `[verdict] capped ${ranked.length} → ${capped.length} for ${auditId}; dropped: ` +
+          ranked.slice(VERDICT_CAP).map((t) => t.name).join(', ')
+      );
+    }
     const verdictResults = await Promise.allSettled(
-      targets.map((t) => inferBrandVerdict(t.name, t.domain, env))
+      capped.map((t) => inferBrandVerdict(t.name, t.domain, env))
     );
+    const emptyVerdicts = capped.filter(
+      (_, i) =>
+        !(
+          verdictResults[i].status === 'fulfilled' &&
+          (verdictResults[i] as PromiseFulfilledResult<string>).value
+        )
+    ).length;
+    if (emptyVerdicts > 0) {
+      console.error(
+        `[verdict] ${emptyVerdicts}/${capped.length} verdicts empty for ${auditId} — ` +
+          `see [verdict] failed lines for cause (likely subrequest/connection limit)`
+      );
+    }
     let brandVerdict = '';
     const competitorVerdicts: BrandVerdict[] = [];
-    targets.forEach((t, i) => {
+    capped.forEach((t, i) => {
       const r = verdictResults[i];
       const v = r.status === 'fulfilled' ? r.value : '';
       if (t.isYou) brandVerdict = v;

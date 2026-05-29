@@ -50,6 +50,7 @@ export function Workspace({ children }: { children: ReactNode }) {
       if (
         a.status === "completed" &&
         a.citation_status !== "done" &&
+        a.citation_status !== "failed" &&
         a.completed_at != null &&
         Date.now() - new Date(a.completed_at).getTime() < 300_000
       ) {

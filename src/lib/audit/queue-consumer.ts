@@ -184,9 +184,10 @@ export async function processQueueBatch(
     if (!audit) continue;
 
     // Finalize only while still running and fully polled. FAST CAS claim flips
-    // the audit to 'completed' (UI unblocks); the winner runs ENRICH, which
-    // writes positioning + brands_named + citation_roles that citation analysis
-    // depends on.
+    // the audit to 'completed' (UI unblocks); the winner runs ENRICH, which now
+    // writes positioning/brands_named/citation_roles, enqueues the citations
+    // stage BEFORE its verdict fan-out (so the send keeps subrequest budget),
+    // then runs verdicts best-effort.
     if (
       audit.status !== 'completed' &&
       audit.status !== 'failed' &&
@@ -194,56 +195,6 @@ export async function processQueueBatch(
     ) {
       const claimed = await finalizeAuditFast(auditId, env);
       if (claimed) await enrichAudit(auditId, env);
-    }
-
-    // Citation analysis enqueue — DECOUPLED from the CAS win. Fires once per
-    // audit via an idempotent CAS on citation_status IS NULL, as soon as enrich
-    // has landed (positioning set), no matter which invocation finalized it.
-    // Must run after enrich because the analysis reads brands_named.
-    const { data: cur } = await supabase
-      .from('audits')
-      .select('status, positioning, citation_status')
-      .eq('id', auditId)
-      .single();
-    if (
-      cur &&
-      cur.status === 'completed' &&
-      cur.positioning != null &&
-      cur.citation_status == null
-    ) {
-      const { data: claimedCit } = await supabase
-        .from('audits')
-        .update({ citation_status: 'analyzing' })
-        .eq('id', auditId)
-        .is('citation_status', null)
-        .select('id');
-      if (claimedCit && claimedCit.length > 0) {
-        try {
-          await env.AUDIT_QUEUE.send({
-            audit_id: auditId,
-            query_text: '',
-            query_category: '',
-            query_index: -1,
-            kind: 'citations',
-          });
-        } catch (err: any) {
-          console.error(
-            `[queue] failed to enqueue citations for ${auditId}:`,
-            JSON.stringify({
-              audit_queue_present: typeof env.AUDIT_QUEUE,
-              has_send: typeof env.AUDIT_QUEUE?.send,
-              name: err?.name,
-              message: err?.message,
-              code: err?.code,
-              cause: err?.cause?.message ?? (err?.cause != null ? String(err.cause) : undefined),
-            }),
-            '\nstack:',
-            String(err?.stack || '').slice(0, 500)
-          );
-          // Release the claim so a later pass can retry the enqueue.
-          await supabase.from('audits').update({ citation_status: null }).eq('id', auditId);
-        }
-      }
     }
   }
 }

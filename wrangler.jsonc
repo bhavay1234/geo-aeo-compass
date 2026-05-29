@@ -20,17 +20,17 @@
     "VITE_SUPABASE_URL": "https://saxyymcncoxkkiajatkz.supabase.co"
   },
   "queues": {
-    // Producer: POST /api/audit/start enqueues 20 messages (one per query).
-    // Consumer: queue() handler in src/server.ts pulls batches of 3 in
-    // parallel — each query gets its own fresh CPU budget, sidestepping
-    // the free-tier waitUntil() kill that capped audits at ~6 queries.
+    // Producer: POST /api/audit/start enqueues one message per query.
+    // Consumer: batch size 1 — each query (and the citations stage) gets its
+    // OWN invocation with a fresh subrequest budget, so per-query OpenAI fan-out
+    // can never stack across queries and blow the 1000-subrequest cap.
     "producers": [
       { "queue": "audit-jobs", "binding": "AUDIT_QUEUE" }
     ],
     "consumers": [
       {
         "queue": "audit-jobs",
-        "max_batch_size": 3,
+        "max_batch_size": 1,
         "max_batch_timeout": 2,
         "max_retries": 2,
         "max_concurrency": 10

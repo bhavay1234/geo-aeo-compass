@@ -96,13 +96,21 @@ function Row({ e, rank }: { e: CitationAnalysisEntry; rank: number }) {
 
 function CitationsView({ audit }: { audit: Audit }) {
   const entries = audit.citation_analysis ?? [];
-  const analyzing = audit.citation_status !== "done";
+  const recentlyCompleted =
+    !!audit.completed_at &&
+    Date.now() - new Date(audit.completed_at).getTime() < 5 * 60_000;
+  const analyzing =
+    audit.citation_status === "analyzing" ||
+    (audit.citation_status == null && recentlyCompleted);
+  const failed = audit.citation_status === "failed";
 
   if (entries.length === 0) {
     return (
       <div className="tm-empty">
         {analyzing ? (
           <p className="mono">◴ Analyzing cited sources…</p>
+        ) : failed ? (
+          <p>Citation analysis was unavailable for this run — try re-running.</p>
         ) : (
           <p>No cited sources recorded in this run.</p>
         )}

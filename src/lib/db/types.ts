@@ -251,7 +251,7 @@ export interface Audit {
   created_at: string;
   completed_at: string | null;
   citation_analysis: CitationAnalysisEntry[];
-  citation_status: "analyzing" | "done" | null;
+  citation_status: "analyzing" | "done" | "failed" | null;
 }
 
 export interface PollResult {

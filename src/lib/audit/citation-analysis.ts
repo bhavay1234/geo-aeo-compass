@@ -205,7 +205,7 @@ function bestOwnPage(query: string, candidates: CrawledPage[]): CrawledPage | nu
 async function setStatus(
   supabase: SupabaseClient,
   auditId: string,
-  status: 'analyzing' | 'done'
+  status: 'analyzing' | 'done' | 'failed'
 ): Promise<void> {
   try {
     const { error } = await supabase
@@ -244,6 +244,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   // in finally — a thrown Apify / verdict / DB error can never leave the stage
   // stuck on 'analyzing' (or null) and hang the UI.
   await setStatus(supabase, auditId, 'analyzing');
+  let terminal: 'done' | 'failed' = 'done';
   try {
   const { data: pollData } = await supabase
     .from('poll_results')
@@ -435,10 +436,20 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
         `${analyzedBrands.size} brands analyzed`
     );
   } catch (err: any) {
-    console.error('[citations] analysis failed — finishing with partial data:', err?.message || err);
+    terminal = 'failed';
+    console.error(
+      `[citations] analysis failed for ${auditId}:`,
+      JSON.stringify({
+        name: err?.name,
+        message: err?.message,
+        cause: err?.cause?.message ?? (err?.cause != null ? String(err.cause) : undefined),
+      }),
+      '\nstack:',
+      String(err?.stack || '').slice(0, 400)
+    );
   } finally {
-    // Guaranteed terminal state: the UI keys off citation_status === 'done', so
-    // we always land there even on partial failure (partial data is kept).
-    await setStatus(supabase, auditId, 'done');
+    // Guaranteed terminal state — never leave the UI stuck on 'analyzing'.
+    // 'done' on success (partial data kept), 'failed' on a thrown error.
+    await setStatus(supabase, auditId, terminal);
   }
 }

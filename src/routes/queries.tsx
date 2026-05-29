@@ -335,7 +335,13 @@ function QueryRow({
       .map((r) => normalizeDomain(r.domain))
   );
 
-  const analyzing = audit.citation_status !== "done";
+  const recentlyCompleted =
+    !!audit.completed_at &&
+    Date.now() - new Date(audit.completed_at).getTime() < 5 * 60_000;
+  const analyzing =
+    audit.citation_status === "analyzing" ||
+    (audit.citation_status == null && recentlyCompleted);
+  const analysisFailed = audit.citation_status === "failed";
 
   // BRANDS NAMED in the prose — the real competitor signal (≠ cited domains).
   const namedSet = new Set((audit.competitors ?? []).map((c) => c.toLowerCase()));
@@ -418,6 +424,13 @@ function QueryRow({
                 <div className="lbl">Why ChatGPT named these</div>
                 <p className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
                   ◴ analyzing influence signals…
+                </p>
+              </div>
+            ) : analysisFailed ? (
+              <div style={{ marginTop: 20 }}>
+                <div className="lbl">Why ChatGPT named these</div>
+                <p style={{ fontSize: 12, color: "var(--ink-3)" }}>
+                  Influence analysis unavailable for this run.
                 </p>
               </div>
             ) : null}
