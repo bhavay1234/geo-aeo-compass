@@ -141,7 +141,19 @@ export async function inferBrandVerdict(
     );
     return (completion.choices[0]?.message?.content || '').trim();
   } catch (err: any) {
-    console.error('[verdict] failed:', err?.message);
+    console.error(
+      '[verdict] failed:',
+      JSON.stringify({
+        name: err?.name,
+        message: err?.message,
+        status: err?.status,
+        code: err?.code,
+        type: err?.type,
+        cause: err?.cause?.message ?? (err?.cause != null ? String(err.cause) : undefined),
+      }),
+      '\nstack:',
+      String(err?.stack || '').slice(0, 500)
+    );
     return '';
   }
 }
@@ -193,7 +205,19 @@ export async function inferInfluenceVerdict(
     );
     return (completion.choices[0]?.message?.content || '').trim();
   } catch (err: any) {
-    console.error('[influence] failed:', err?.message);
+    console.error(
+      '[influence] failed:',
+      JSON.stringify({
+        name: err?.name,
+        message: err?.message,
+        status: err?.status,
+        code: err?.code,
+        type: err?.type,
+        cause: err?.cause?.message ?? (err?.cause != null ? String(err.cause) : undefined),
+      }),
+      '\nstack:',
+      String(err?.stack || '').slice(0, 500)
+    );
     return '';
   }
 }

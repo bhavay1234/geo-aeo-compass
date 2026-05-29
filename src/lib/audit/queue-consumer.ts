@@ -227,7 +227,19 @@ export async function processQueueBatch(
             kind: 'citations',
           });
         } catch (err: any) {
-          console.error(`[queue] failed to enqueue citations for ${auditId}:`, err?.message || err);
+          console.error(
+            `[queue] failed to enqueue citations for ${auditId}:`,
+            JSON.stringify({
+              audit_queue_present: typeof env.AUDIT_QUEUE,
+              has_send: typeof env.AUDIT_QUEUE?.send,
+              name: err?.name,
+              message: err?.message,
+              code: err?.code,
+              cause: err?.cause?.message ?? (err?.cause != null ? String(err.cause) : undefined),
+            }),
+            '\nstack:',
+            String(err?.stack || '').slice(0, 500)
+          );
           // Release the claim so a later pass can retry the enqueue.
           await supabase.from('audits').update({ citation_status: null }).eq('id', auditId);
         }
