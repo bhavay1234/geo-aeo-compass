@@ -8,6 +8,7 @@ read comment threads, and look up users.
 
 | Tool | What it does |
 | --- | --- |
+| `reddit_research` | **Start here.** One input (theme/keyword/topic/brand) → relevant discussions, the communities it comes up in, recent mentions, and top comments |
 | `search_reddit` | Search posts across Reddit or within one subreddit |
 | `get_subreddit_posts` | List a subreddit's posts (`hot`/`new`/`top`/`rising`/`controversial`) |
 | `get_post_comments` | Fetch a post and its nested comment tree |

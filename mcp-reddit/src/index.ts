@@ -223,6 +223,148 @@ tool(
   }
 );
 
+tool(
+  'reddit_research',
+  'One-shot Reddit research for a theme, keyword, topic, or brand name. Returns the most relevant discussions, the communities where it comes up, recent mentions, and (optionally) top comments from the leading threads. Use this when you just have a term and want to know what Reddit is saying about it.',
+  {
+    query: z
+      .string()
+      .describe('A theme, keyword, topic, or brand name (e.g. "Notion", "electric SUV range anxiety").'),
+    subreddit: z
+      .string()
+      .optional()
+      .describe('Optionally restrict all research to a single subreddit (name only, no "r/").'),
+    time: timeRange.describe(
+      'Recency window for relevance ranking (hour/day/week/month/year/all). Defaults to month.'
+    ),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(50)
+      .default(20)
+      .describe('Max number of relevant posts to return.'),
+    include_comments: z
+      .boolean()
+      .default(true)
+      .describe('Also pull top comments from the most-discussed matching threads.'),
+  },
+  async (a) => {
+    const query = a.query as string;
+    const subreddit = a.subreddit as string | undefined;
+    const time = (a.time as string) || 'month';
+    const limit = a.limit as number;
+    const searchPath = subreddit ? `/r/${subreddit}/search` : '/search';
+    const restrict = subreddit ? 'true' : undefined;
+
+    // Run the relevance search, a recency search, and (unless scoped) a
+    // community search in parallel.
+    const [relevant, recent, subs] = await Promise.all([
+      client
+        .get(searchPath, {
+          q: query,
+          sort: 'relevance',
+          t: time,
+          limit,
+          restrict_sr: restrict,
+          type: 'link',
+        })
+        .then((l) => postsFromListing(l).posts),
+      client
+        .get(searchPath, {
+          q: query,
+          sort: 'new',
+          limit: 10,
+          restrict_sr: restrict,
+          type: 'link',
+        })
+        .then((l) => postsFromListing(l).posts),
+      subreddit
+        ? Promise.resolve(null)
+        : client.get('/subreddits/search', { q: query, limit: 8 }).then(
+            (l) =>
+              (
+                (l as { data?: { children?: { data: Record<string, unknown> }[] } }).data
+                  ?.children ?? []
+              ).map((c) => shapeSubreddit(c.data))
+          ),
+    ]);
+
+    const snippet = (text?: string) =>
+      text ? text.replace(/\s+/g, ' ').trim().slice(0, 280) : undefined;
+
+    const posts = relevant.map((p) => ({
+      title: p.title,
+      subreddit: p.subreddit,
+      author: p.author,
+      score: p.score,
+      num_comments: p.num_comments,
+      upvote_ratio: p.upvote_ratio,
+      created_utc: p.created_utc,
+      permalink: p.permalink,
+      url: p.url,
+      snippet: snippet(p.selftext),
+    }));
+
+    // Which subreddits surface this term most, by post count among the hits.
+    const counts = new Map<string, number>();
+    for (const p of relevant) counts.set(p.subreddit, (counts.get(p.subreddit) ?? 0) + 1);
+    const top_subreddits = [...counts.entries()]
+      .sort((x, y) => y[1] - x[1])
+      .slice(0, 8)
+      .map(([name, post_count]) => ({ name, post_count }));
+
+    // Optional: top comments from the 3 most-discussed relevant threads.
+    let highlights: unknown[] | undefined;
+    if (a.include_comments) {
+      const leaders = [...relevant]
+        .filter((p) => p.num_comments > 0)
+        .sort((x, y) => y.num_comments - x.num_comments)
+        .slice(0, 3);
+      highlights = (
+        await Promise.all(
+          leaders.map(async (p) => {
+            try {
+              const res = (await client.get(`/r/${p.subreddit}/comments/${p.id}`, {
+                sort: 'top',
+                limit: 5,
+              })) as unknown[];
+              const commentChildren =
+                (res[1] as { data?: { children?: Parameters<typeof shapeComment>[0][] } })?.data
+                  ?.children ?? [];
+              const top_comments = commentChildren
+                .map(shapeComment)
+                .filter((c): c is Comment => c !== null)
+                .slice(0, 5)
+                .map((c) => ({ author: c.author, score: c.score, body: snippet(c.body) }));
+              return { post_title: p.title, permalink: p.permalink, top_comments };
+            } catch {
+              return null;
+            }
+          })
+        )
+      ).filter(Boolean);
+    }
+
+    return {
+      query,
+      time,
+      relevant_communities: subs ?? undefined,
+      top_subreddits,
+      posts,
+      recent_mentions: recent.map((p) => ({
+        title: p.title,
+        subreddit: p.subreddit,
+        score: p.score,
+        num_comments: p.num_comments,
+        created_utc: p.created_utc,
+        permalink: p.permalink,
+      })),
+      highlights,
+    };
+  }
+);
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
