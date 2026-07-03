@@ -14,6 +14,7 @@ import type {
   Citation,
   CitationRole,
   CitationAnalysisEntry,
+  LlmSource,
   PageSignals,
   PageRef,
   InfluenceSource,
@@ -22,12 +23,20 @@ import type {
   YouInfluence,
 } from '../db/types';
 
+/** Normalize legacy `llm_source` values ('openai') to the current 'chatgpt'
+ *  key so cross-LLM counts don't split into stray buckets. */
+function normalizeLlm(s: string | null | undefined): LlmSource {
+  if (s === 'perplexity' || s === 'gemini') return s;
+  return 'chatgpt';
+}
+
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const TOP_BRANDS_PER_QUERY = 3; // Apify/LLM cap → ~24 verdict calls/audit
 
 type PollRow = {
   id: string;
   query_text: string;
+  llm_source: string | null;
   citations: Citation[] | null;
   citation_roles: CitationRole[] | null;
   competitors_cited: { name: string }[] | null;
@@ -248,27 +257,41 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   try {
   const { data: pollData } = await supabase
     .from('poll_results')
-    .select('id, query_text, citations, citation_roles, competitors_cited, brands_named')
+    .select('id, query_text, llm_source, citations, citation_roles, competitors_cited, brands_named')
     .eq('audit_id', auditId);
   const polls = (pollData as PollRow[]) || [];
 
   // ── Part 1/2: fetch every cited URL, brand presence (us), Citations rollup ──
+  // Track distinct QUERY texts and distinct LLMs per URL — the two multi-LLM
+  // leverage signals. Universal sources (cited by all LLMs across many queries)
+  // are the get-listed priority.
   const urlMeta = new Map<
     string,
-    { domain: string; source_type: Citation['source_type']; queries: Set<string> }
+    {
+      domain: string;
+      source_type: Citation['source_type'];
+      queries: Set<string>; // distinct query_text
+      llms: Set<string>; // distinct llm_source
+    }
   >();
-  for (const p of polls)
+  for (const p of polls) {
+    const llm = normalizeLlm(p.llm_source);
     for (const c of p.citations ?? []) {
       if (!c.url) continue;
       const ex = urlMeta.get(c.url);
-      if (ex) ex.queries.add(p.id);
-      else
+      if (ex) {
+        ex.queries.add(p.query_text);
+        ex.llms.add(llm);
+      } else {
         urlMeta.set(c.url, {
           domain: normalizeDomain(c.domain),
           source_type: c.source_type,
-          queries: new Set([p.id]),
+          queries: new Set([p.query_text]),
+          llms: new Set([llm]),
         });
+      }
     }
+  }
   const allUrls = Array.from(urlMeta.keys());
   const pages = await resolveSignals(supabase, allUrls, env);
 
@@ -283,11 +306,18 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
       domain: meta.domain,
       source_type: meta.source_type,
       query_count: meta.queries.size,
+      llms_citing: Array.from(meta.llms) as LlmSource[],
       brand_present: presence.brand_present,
       match_type: presence.match_type,
     };
   });
-  analysis.sort((a, b) => b.query_count - a.query_count);
+  // Rank by cross-LLM leverage first (# distinct LLMs citing), then breadth
+  // across queries. A source cited by all LLMs is the universal opportunity.
+  analysis.sort((a, b) => {
+    if (b.llms_citing.length !== a.llms_citing.length)
+      return b.llms_citing.length - a.llms_citing.length;
+    return b.query_count - a.query_count;
+  });
   const targetNamedUrls = new Set(analysis.filter((a) => a.brand_present).map((a) => a.url));
 
   await supabase

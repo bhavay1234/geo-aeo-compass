@@ -1,13 +1,47 @@
-import type { Audit, PollResult, Citation, DecisiveFactor } from "@/lib/db/types";
+import type {
+  Audit,
+  PollResult,
+  Citation,
+  DecisiveFactor,
+  LlmSource,
+} from "@/lib/db/types";
 import { normalizeDomain, competitorToDomain } from "@/lib/audit/source-classifier";
 
 export type QueryState = "absent" | "weak" | "held";
 
-/** Per-query state: absent (not cited), weak (cited but rank > 2), held (rank ≤ 2). */
+export const ALL_LLMS: LlmSource[] = ["chatgpt", "perplexity", "gemini"];
+
+/** Normalize legacy 'openai' rows to 'chatgpt' so LLM buckets don't split. */
+export function normalizeLlm(s: string | null | undefined): LlmSource {
+  if (s === "perplexity" || s === "gemini") return s;
+  return "chatgpt";
+}
+
+/** LLMs actually polled for this audit (denominator for cross-LLM signals). */
+export function llmsPolled(audit: Audit): LlmSource[] {
+  const raw = audit.llms_polled ?? [];
+  const clean = raw.filter((l): l is LlmSource =>
+    l === "chatgpt" || l === "perplexity" || l === "gemini"
+  );
+  return clean.length > 0 ? clean : ["chatgpt"];
+}
+
+/** Per-poll state: absent (not cited), weak (cited but rank > 2), held (rank ≤ 2). */
 export function queryState(p: Pick<PollResult, "brand_cited" | "brand_position">): QueryState {
   if (!p.brand_cited) return "absent";
   if ((p.brand_position ?? 99) > 2) return "weak";
   return "held";
+}
+
+/** Aggregate query state across all LLMs that were polled for it.
+ *  held = cited-well in ALL LLMs · weak = cited in some / cited-low · absent = cited in NONE. */
+export function aggregateQueryState(perPoll: QueryState[], nLlmsPolled: number): QueryState {
+  if (perPoll.length === 0) return "absent";
+  const held = perPoll.filter((s) => s === "held").length;
+  const cited = perPoll.filter((s) => s !== "absent").length;
+  if (cited === 0) return "absent";
+  if (held === perPoll.length && perPoll.length === nLlmsPolled) return "held";
+  return "weak";
 }
 
 export type SourceTagKind = "you" | "comp" | "agg" | "ed";
@@ -145,40 +179,110 @@ export function allCompetitorBrands(audit: Audit, polls: PollResult[]): string[]
   return out;
 }
 
+export interface LlmCell {
+  llm: LlmSource;
+  cited: boolean;
+  position: number | null;
+}
+
 export interface GapRow {
-  id: string;
+  id: string; // canonical: query_text
   query: string;
+  /** Aggregate state across every LLM polled for this query. */
   state: QueryState;
+  /** Best (min) position across LLMs where cited; null if absent everywhere. */
   position: number | null;
   citedCount: number;
+  /** Union of recommended competitor brands across all LLM rows. */
   who: string[];
+  /** Per-LLM state row (missing LLMs shown as absent). */
+  perLlm: LlmCell[];
+  citedLlms: LlmSource[];
+  absentLlms: LlmSource[];
   rankScore: number;
 }
 
 const STATE_WEIGHT: Record<QueryState, number> = { absent: 3, weak: 2, held: 1 };
 
+/** Group poll_results by unique query_text — one entry per query, all LLM rows. */
+export function groupPollsByQuery(polls: PollResult[]): Map<string, PollResult[]> {
+  const out = new Map<string, PollResult[]>();
+  for (const p of polls) {
+    const key = p.query_text;
+    const arr = out.get(key);
+    if (arr) arr.push(p);
+    else out.set(key, [p]);
+  }
+  return out;
+}
+
 /**
- * Rank gaps by "lost demand". We don't ingest search volume, so this is the
- * spec's fallback: citation-absence + competitor-count (NO /mo figures faked).
+ * Rank gaps by "lost demand" across LLMs. One row per query (aggregate); each
+ * row carries per-LLM cited/absent so the UI can render "invisible in X, cited
+ * in Y" chips. Absent-everywhere ranks highest. No fake /mo figures.
  */
 export function buildGapRows(audit: Audit, polls: PollResult[]): GapRow[] {
-  return polls
-    .map((p) => {
-      const state = queryState(p);
-      const who = whoCited(p, audit.brand_name);
-      const citedCount = (p.citations ?? []).length;
-      const rankScore = STATE_WEIGHT[state] * 1000 + who.length * 25 + citedCount;
+  const llms = llmsPolled(audit);
+  const groups = groupPollsByQuery(polls);
+  const rows: GapRow[] = [];
+
+  for (const [query, group] of groups) {
+    const byLlm = new Map<LlmSource, PollResult>();
+    for (const p of group) byLlm.set(normalizeLlm(p.llm_source), p);
+
+    const perLlm: LlmCell[] = llms.map((llm) => {
+      const p = byLlm.get(llm);
       return {
-        id: p.id,
-        query: p.query_text,
-        state,
-        position: p.brand_position,
-        citedCount,
-        who,
-        rankScore,
+        llm,
+        cited: !!p?.brand_cited,
+        position: p?.brand_position ?? null,
       };
-    })
-    .sort((a, b) => b.rankScore - a.rankScore);
+    });
+    const citedLlms = perLlm.filter((c) => c.cited).map((c) => c.llm);
+    const absentLlms = perLlm.filter((c) => !c.cited).map((c) => c.llm);
+    const positions = perLlm
+      .map((c) => c.position)
+      .filter((n): n is number => typeof n === "number");
+    const position = positions.length ? Math.min(...positions) : null;
+
+    const perPollState = group.map(queryState);
+    const state = aggregateQueryState(perPollState, llms.length);
+
+    // Union recommended brands across all LLM rows for this query.
+    const whoSet = new Set<string>();
+    const who: string[] = [];
+    for (const p of group) {
+      for (const nm of recommendedBrands(p, audit.brand_name)) {
+        const k = nm.toLowerCase();
+        if (!whoSet.has(k)) {
+          whoSet.add(k);
+          who.push(nm);
+        }
+      }
+    }
+    // Distinct cited source URLs across LLM rows.
+    const urlSet = new Set<string>();
+    for (const p of group) for (const c of p.citations ?? []) if (c.url) urlSet.add(c.url);
+    const citedCount = urlSet.size;
+
+    const rankScore =
+      STATE_WEIGHT[state] * 1000 + absentLlms.length * 200 + who.length * 25 + citedCount;
+
+    rows.push({
+      id: query,
+      query,
+      state,
+      position,
+      citedCount,
+      who,
+      perLlm,
+      citedLlms,
+      absentLlms,
+      rankScore,
+    });
+  }
+
+  return rows.sort((a, b) => b.rankScore - a.rankScore);
 }
 
 export interface SovEntry {
@@ -190,9 +294,11 @@ export interface SovEntry {
 }
 
 /**
- * Share of RECOMMENDATIONS across answers — the share a buyer understands:
- * "of all the products ChatGPT names, how often is it you vs each competitor?"
- * Counts BRANDS NAMED in prose (not cited domains). Each brand once per query.
+ * Share of RECOMMENDATIONS across queries — the share a buyer understands:
+ * "of all the products the LLMs collectively name, how often is it you vs each
+ * competitor?" One count per (brand, query) — named in any LLM = one point, so
+ * being named in all 3 LLMs for one query doesn't triple-count. Cross-LLM
+ * aggregate; use `computeShareOfVoiceByLlm` for per-LLM comparison.
  */
 export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry[] {
   const counts = new Map<string, { name: string; domain: string | null; count: number; isYou: boolean }>();
@@ -202,9 +308,20 @@ export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry
     else counts.set(key, { name, domain, count: 1, isYou });
   };
 
-  for (const p of polls) {
-    if (p.brand_cited) bump("__you__", audit.brand_name, audit.domain, true);
-    for (const nm of recommendedBrands(p, audit.brand_name)) {
+  const groups = groupPollsByQuery(polls);
+  for (const [, group] of groups) {
+    const youCited = group.some((p) => p.brand_cited);
+    if (youCited) bump("__you__", audit.brand_name, audit.domain, true);
+    // Dedupe recommended brands WITHIN a query so cross-LLM overlap doesn't
+    // triple-count (named in all 3 LLMs → 1 point). lower → display casing.
+    const perQueryBrands = new Map<string, string>();
+    for (const p of group) {
+      for (const nm of recommendedBrands(p, audit.brand_name)) {
+        const k = nm.toLowerCase();
+        if (!perQueryBrands.has(k)) perQueryBrands.set(k, nm);
+      }
+    }
+    for (const [, nm] of perQueryBrands) {
       const orig =
         (audit.competitors ?? []).find((c) => c.toLowerCase() === nm.toLowerCase()) ||
         nm;
@@ -216,6 +333,71 @@ export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry
   return Array.from(counts.values())
     .map((e) => ({ ...e, pct: Math.round((e.count / total) * 100) }))
     .sort((a, b) => b.count - a.count);
+}
+
+/** Per-LLM Share of Recommendations — one SoV list per LLM (for the demo
+ *  "who's nastier: ChatGPT or Perplexity" comparison bars). */
+export function computeShareOfVoiceByLlm(
+  audit: Audit,
+  polls: PollResult[]
+): Record<LlmSource, SovEntry[]> {
+  const out = {} as Record<LlmSource, SovEntry[]>;
+  for (const llm of llmsPolled(audit)) {
+    const subset = polls.filter((p) => normalizeLlm(p.llm_source) === llm);
+    out[llm] = computeShareOfVoice(audit, subset);
+  }
+  return out;
+}
+
+export interface BrandConsensus {
+  brand: string;
+  /** Number of distinct queries where the brand was named in at least one LLM. */
+  queriesNamed: number;
+  /** Number of distinct LLMs (across the whole audit) that ever named it. */
+  llmsNaming: LlmSource[];
+  /** Per-LLM count of queries where this LLM named the brand. */
+  byLlm: Record<LlmSource, number>;
+}
+
+/** Cross-LLM consensus for a single brand — powers the "named by N/M LLMs"
+ *  chip on Summary + Competitors. Excludes the audited brand automatically. */
+export function brandConsensus(
+  audit: Audit,
+  polls: PollResult[],
+  brandName: string
+): BrandConsensus {
+  const bl = brandName.trim().toLowerCase();
+  const llms = llmsPolled(audit);
+  const groups = groupPollsByQuery(polls);
+  const byLlm = Object.fromEntries(llms.map((l) => [l, 0])) as Record<LlmSource, number>;
+  const llmsNamingSet = new Set<LlmSource>();
+  let queriesNamed = 0;
+
+  for (const [, group] of groups) {
+    let namedThisQuery = false;
+    const seenLlms = new Set<LlmSource>();
+    for (const p of group) {
+      const named = recommendedBrands(p, audit.brand_name).some(
+        (n) => n.toLowerCase() === bl
+      );
+      if (!named) continue;
+      const llm = normalizeLlm(p.llm_source);
+      if (!seenLlms.has(llm)) {
+        byLlm[llm] = (byLlm[llm] ?? 0) + 1;
+        seenLlms.add(llm);
+        llmsNamingSet.add(llm);
+      }
+      namedThisQuery = true;
+    }
+    if (namedThisQuery) queriesNamed++;
+  }
+
+  return {
+    brand: brandName,
+    queriesNamed,
+    llmsNaming: llms.filter((l) => llmsNamingSet.has(l)),
+    byLlm,
+  };
 }
 
 export interface ProfileSource {
@@ -237,6 +419,8 @@ export interface CompetitorProfile {
   strengths: string[];
   beatsYou: string[];
   sources: ProfileSource[];
+  /** Cross-LLM consensus: which LLMs named this brand + per-LLM query counts. */
+  consensus: BrandConsensus;
 }
 
 function tierForPct(pct: number): 1 | 2 | 3 {
@@ -381,6 +565,10 @@ export function buildCompetitorProfiles(
       ? audit.brand_verdict ?? ""
       : verdictByKey.get(e.name.toLowerCase()) ?? (dn ? verdictByKey.get(dn) ?? "" : "");
 
+    const consensus = e.isYou
+      ? brandConsensus(audit, polls, audit.brand_name)
+      : brandConsensus(audit, polls, e.name);
+
     return {
       name: e.name,
       domain: e.domain,
@@ -392,6 +580,7 @@ export function buildCompetitorProfiles(
       strengths,
       beatsYou,
       sources,
+      consensus,
     };
   });
 

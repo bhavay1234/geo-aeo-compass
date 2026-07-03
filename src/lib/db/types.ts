@@ -146,7 +146,12 @@ export interface CitationAnalysisEntry {
   url: string;
   domain: string;
   source_type: SourceType;
+  /** Distinct QUERY texts (not polls) citing this URL — the buyer-facing count. */
   query_count: number;
+  /** Which LLMs cited this URL across the audit — the multi-LLM leverage
+   *  signal. A source cited by all 3 is a "universal source" (get-listed
+   *  priority). Legacy single-LLM entries default to ["chatgpt"]. */
+  llms_citing: LlmSource[];
   brand_present: boolean;
   match_type: "name" | "domain" | "none";
 }
