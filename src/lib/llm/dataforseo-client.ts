@@ -156,6 +156,24 @@ function extractFromItems(items: AnyObj[]): { text: string; refs: AnyObj[] } {
   return { text, refs };
 }
 
+/**
+ * ChatGPT-via-DFS embeds its web citations as inline markdown links in the
+ * answer text — "([forbes.com](https://forbes.com/...?utm_source=openai))" —
+ * with EMPTY structured annotations (verified live). When no annotations came
+ * back, mine the text for markdown links so the citation rail isn't empty.
+ */
+function refsFromMarkdown(text: string): AnyObj[] {
+  const out: AnyObj[] = [];
+  const seen = new Set<string>();
+  for (const m of text.matchAll(/\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)]+)\)/g)) {
+    const url = m[2];
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({ url, title: m[1] });
+  }
+  return out;
+}
+
 function normalize(
   raw: unknown,
   llm: string,
@@ -168,7 +186,10 @@ function normalize(
   const r0 = result[0] ?? {};
   const items = (r0.items as AnyObj[] | undefined) ?? [r0];
 
-  const { text: response_text, refs: references } = extractFromItems(items);
+  const extracted = extractFromItems(items);
+  const response_text = extracted.text;
+  const references =
+    extracted.refs.length > 0 ? extracted.refs : refsFromMarkdown(response_text);
 
   const citations: RawCitation[] = [];
   const raw_citations: RawInlineCitation[] = [];
