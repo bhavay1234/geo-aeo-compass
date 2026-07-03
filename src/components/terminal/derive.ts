@@ -124,29 +124,35 @@ export interface InfluenceRollup {
   youInSourcesCount: number; // # of those driving source-domains we also appear in
 }
 
-/** Audit-wide influence summary for one competitor brand (Competitors tab). */
+/** Audit-wide influence summary for one competitor brand (Competitors tab).
+ *  Counts DISTINCT QUERIES (not polls) — a multi-LLM audit has N polls per
+ *  query, and "named in 6/8 queries" must not inflate to 18/24. */
 export function influenceRollup(
   polls: PollResult[],
   brandName: string
 ): InfluenceRollup | null {
   const bl = brandName.toLowerCase();
-  let queriesNamed = 0;
   const factorTally: Record<string, number> = {};
   const srcCount = new Map<string, number>();
   const compDomains = new Set<string>();
   const youDomains = new Set<string>();
-  for (const p of polls) {
-    const w = (p.why_cited ?? []).find((x) => x.brand.toLowerCase() === bl);
-    for (const s of p.own_page?.named_in_sources ?? []) youDomains.add(s.domain);
-    if (!w) continue;
-    queriesNamed++;
-    factorTally[w.decisive] = (factorTally[w.decisive] ?? 0) + 1;
-    for (const s of w.named_in_sources) {
-      srcCount.set(s.domain, (srcCount.get(s.domain) ?? 0) + 1);
-      compDomains.add(s.domain);
+  const namedQueries = new Set<string>();
+
+  const groups = groupPollsByQuery(polls);
+  for (const [query, group] of groups) {
+    for (const p of group) {
+      for (const s of p.own_page?.named_in_sources ?? []) youDomains.add(s.domain);
+      const w = (p.why_cited ?? []).find((x) => x.brand.toLowerCase() === bl);
+      if (!w) continue;
+      namedQueries.add(query);
+      factorTally[w.decisive] = (factorTally[w.decisive] ?? 0) + 1;
+      for (const s of w.named_in_sources) {
+        srcCount.set(s.domain, (srcCount.get(s.domain) ?? 0) + 1);
+        compDomains.add(s.domain);
+      }
     }
   }
-  if (queriesNamed === 0) return null;
+  if (namedQueries.size === 0) return null;
   const topSources = Array.from(srcCount.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 4)
@@ -156,8 +162,8 @@ export function influenceRollup(
   let youInSourcesCount = 0;
   for (const d of compDomains) if (youDomains.has(d)) youInSourcesCount++;
   return {
-    queriesNamed,
-    totalQueries: polls.length,
+    queriesNamed: namedQueries.size,
+    totalQueries: groups.size,
     dominant,
     topSources,
     youInSourcesCount,

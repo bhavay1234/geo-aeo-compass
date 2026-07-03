@@ -382,10 +382,10 @@ function AnalyticsView({ audit, pollsCount }: { audit: Audit; pollsCount: number
         )}
       </div>
 
-      {/* Coverage over runs */}
+      {/* Coverage over runs — per ANSWER (one answer per query per LLM). */}
       <div className="tm-panel tm-reveal" style={{ animationDelay: ".05s" }}>
         <div className="tm-phead">
-          <h2>◫ Coverage · cited vs blind</h2>
+          <h2>◫ Coverage · cited vs blind answers</h2>
           <span className="meta">{multi ? "per run" : "this run"}</span>
         </div>
         <CoverageBars runs={multi ? runs : [current]} />
@@ -397,8 +397,8 @@ function AnalyticsView({ audit, pollsCount }: { audit: Audit; pollsCount: number
         style={{ borderBottom: "none", animationDelay: ".1s" }}
       >
         <div className="tm-phead">
-          <h2>◐ Query outcomes · this run</h2>
-          <span className="meta">{pollsCount} queries</span>
+          <h2>◐ Answer outcomes · this run</h2>
+          <span className="meta">{pollsCount} answers</span>
         </div>
         <OutcomeMix audit={audit} />
       </div>

@@ -5,6 +5,9 @@ import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
 import { PositionDots, SourceTag } from "@/components/terminal/primitives";
 import {
   queryState,
+  aggregateQueryState,
+  groupPollsByQuery,
+  llmsPolled,
   tagSource,
   recommendedBrands,
   normalizeLlm,
@@ -15,16 +18,22 @@ import type {
   Audit,
   PollResult,
   Citation,
+  LlmSource,
   WhyNamed,
   YouInfluence,
   DecisiveFactor,
   SourceType,
 } from "@/lib/db/types";
 
-const LLM_LABEL: Record<string, string> = {
+const LLM_LABEL: Record<LlmSource, string> = {
   chatgpt: "ChatGPT",
   perplexity: "Perplexity",
   gemini: "Gemini",
+};
+const LLM_SHORT: Record<LlmSource, string> = {
+  chatgpt: "GPT",
+  perplexity: "PPX",
+  gemini: "GEM",
 };
 
 export const Route = createFileRoute("/queries")({
@@ -230,10 +239,17 @@ function highlightAnswer(
   return out;
 }
 
+interface QueryGroup {
+  query: string;
+  state: QueryState;
+  polls: Map<LlmSource, PollResult>;
+}
+
 function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [openId, setOpenId] = useState<string | null>(null);
 
+  const llms = llmsPolled(audit);
   const ownNorm = normalizeDomain(audit.domain);
   const namedNorm = new Set(
     (audit.competitors ?? [])
@@ -241,35 +257,35 @@ function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
       .filter(Boolean)
   );
 
-  // Sort by state, then group by query_text so the multi-LLM rows for a query
-  // sit adjacent to each other (visually the "3 LLMs asked, here are their
-  // answers" beat). Within a group, order by LLM (chatgpt → perplexity → gemini).
-  const LLM_ORDER: Record<string, number> = { chatgpt: 0, perplexity: 1, gemini: 2 };
-  const rows = polls
-    .map((p) => ({ p, state: queryState(p) }))
-    .sort((a, b) => {
-      const w = { absent: 3, weak: 2, held: 1 };
-      const sd = w[b.state] - w[a.state];
-      if (sd !== 0) return sd;
-      const qcmp = a.p.query_text.localeCompare(b.p.query_text);
-      if (qcmp !== 0) return qcmp;
-      return (
-        (LLM_ORDER[normalizeLlm(a.p.llm_source)] ?? 9) -
-        (LLM_ORDER[normalizeLlm(b.p.llm_source)] ?? 9)
-      );
-    });
+  // ONE row per query — each holds its per-LLM polls. State aggregates across
+  // the LLMs polled (held = cited-well everywhere, absent = cited nowhere).
+  const groups: QueryGroup[] = Array.from(groupPollsByQuery(polls).entries()).map(
+    ([query, group]) => {
+      const byLlm = new Map<LlmSource, PollResult>();
+      for (const p of group) byLlm.set(normalizeLlm(p.llm_source), p);
+      return {
+        query,
+        state: aggregateQueryState(group.map(queryState), llms.length),
+        polls: byLlm,
+      };
+    }
+  );
+  const w = { absent: 3, weak: 2, held: 1 };
+  groups.sort(
+    (a, b) => w[b.state] - w[a.state] || a.query.localeCompare(b.query)
+  );
 
   const counts = {
-    all: rows.length,
-    absent: rows.filter((r) => r.state === "absent").length,
-    weak: rows.filter((r) => r.state === "weak").length,
-    cited: rows.filter((r) => r.state === "held").length,
+    all: groups.length,
+    absent: groups.filter((g) => g.state === "absent").length,
+    weak: groups.filter((g) => g.state === "weak").length,
+    cited: groups.filter((g) => g.state === "held").length,
   };
 
-  const visible = rows.filter((r) => {
+  const visible = groups.filter((g) => {
     if (filter === "all") return true;
-    if (filter === "cited") return r.state === "held";
-    return r.state === filter;
+    if (filter === "cited") return g.state === "held";
+    return g.state === filter;
   });
 
   const segClass = (k: Filter) => `tm-seg ${filter === k ? "on" : ""}`;
@@ -290,20 +306,22 @@ function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
           Cited <span className="n">{counts.cited}</span>
         </button>
         <span className="sp" />
-        <span className="tm-sort mono">SORT: lost demand ↓</span>
+        <span className="tm-sort mono">
+          {llms.length > 1 ? `${llms.length} LLMs · ` : ""}SORT: lost demand ↓
+        </span>
       </div>
 
       <div className="tm-rows">
         {visible.length === 0 ? (
           <div className="tm-empty">No queries in this filter.</div>
         ) : (
-          visible.map(({ p, state }) => (
+          visible.map((g) => (
             <QueryRow
-              key={p.id}
-              poll={p}
-              state={state}
-              open={openId === p.id}
-              onToggle={() => setOpenId((cur) => (cur === p.id ? null : p.id))}
+              key={g.query}
+              group={g}
+              llms={llms}
+              open={openId === g.query}
+              onToggle={() => setOpenId((cur) => (cur === g.query ? null : g.query))}
               audit={audit}
               ownNorm={ownNorm}
               namedNorm={namedNorm}
@@ -316,22 +334,23 @@ function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
 }
 
 function QueryRow({
-  poll,
-  state,
+  group,
+  llms,
   open,
   onToggle,
   audit,
   ownNorm,
   namedNorm,
 }: {
-  poll: PollResult;
-  state: QueryState;
+  group: QueryGroup;
+  llms: LlmSource[];
   open: boolean;
   onToggle: () => void;
   audit: Audit;
   ownNorm: string;
   namedNorm: Set<string>;
 }) {
+  const { state } = group;
   const stateClass =
     state === "absent" ? "absent" : state === "weak" ? "weak" : "cited";
   const badge =
@@ -341,6 +360,203 @@ function QueryRow({
         ? { cls: "bw", txt: "Weak" }
         : { cls: "bc", txt: "Cited" };
 
+  // Which LLM's answer to show when expanded. Default to the first polled LLM
+  // that actually has an answer; user can switch via the sub-tabs.
+  const available = llms.filter((l) => group.polls.has(l));
+  const [activeLlm, setActiveLlm] = useState<LlmSource | null>(null);
+  const shown = activeLlm && group.polls.has(activeLlm) ? activeLlm : available[0] ?? null;
+  const poll = shown ? group.polls.get(shown)! : null;
+
+  // Aggregate header stats — union across the LLM rows for this query.
+  const recSet = new Map<string, boolean>(); // lower -> tracked
+  const namedSet = new Set((audit.competitors ?? []).map((c) => c.toLowerCase()));
+  const urlSet = new Set<string>();
+  for (const p of group.polls.values()) {
+    for (const nm of recommendedBrands(p, audit.brand_name)) {
+      const k = nm.toLowerCase();
+      if (!recSet.has(k)) recSet.set(k, namedSet.has(k));
+    }
+    for (const c of p.citations ?? []) if (c.url) urlSet.add(c.url);
+  }
+  const positions = Array.from(group.polls.values())
+    .map((p) => p.brand_position)
+    .filter((n): n is number => typeof n === "number");
+  const bestPos = positions.length ? Math.min(...positions) : null;
+
+  const citedIn = llms.filter((l) => group.polls.get(l)?.brand_cited);
+  const subline =
+    llms.length > 1
+      ? state === "absent"
+        ? `absent in all ${llms.length} LLMs`
+        : state === "held"
+          ? `cited by all ${llms.length} LLMs`
+          : `cited in ${citedIn.map((l) => LLM_LABEL[l]).join(", ")} · absent in ${llms
+              .filter((l) => !group.polls.get(l)?.brand_cited)
+              .map((l) => LLM_LABEL[l])
+              .join(", ")}`
+      : state === "absent"
+        ? "you're absent"
+        : state === "weak"
+          ? "cited but buried"
+          : "you're cited";
+
+  return (
+    <div className={`tm-qr ${stateClass} ${open ? "open" : ""}`}>
+      <button className="tm-qr-head" onClick={onToggle} aria-expanded={open}>
+        <span className="tm-tw" aria-hidden>
+          ▶
+        </span>
+        <div>
+          <div className="tm-qr-q">
+            {group.query}
+            {llms.length > 1 && (
+              <span style={{ marginLeft: 10, display: "inline-flex", gap: 4, verticalAlign: "middle" }}>
+                {llms.map((l) => {
+                  const p = group.polls.get(l);
+                  const cited = !!p?.brand_cited;
+                  return (
+                    <span
+                      key={l}
+                      className="mono"
+                      title={`${LLM_LABEL[l]} · ${
+                        !p ? "no answer" : cited ? `cited${p.brand_position ? ` #${p.brand_position}` : ""}` : "absent"
+                      }`}
+                      style={{
+                        fontSize: 9,
+                        padding: "1px 5px",
+                        borderRadius: 2,
+                        fontWeight: 700,
+                        letterSpacing: ".04em",
+                        background: !p
+                          ? "var(--panel-2)"
+                          : cited
+                            ? "var(--pos-bg)"
+                            : "var(--hot-bg)",
+                        color: !p ? "var(--ink-3)" : cited ? "var(--pos)" : "var(--hot)",
+                      }}
+                    >
+                      {LLM_SHORT[l]}
+                      {p ? (cited ? " ✓" : " ✗") : " —"}
+                    </span>
+                  );
+                })}
+              </span>
+            )}
+          </div>
+          <div className="tm-qr-q sub">{subline}</div>
+        </div>
+        <div className="tm-qr-pos">
+          {bestPos ? (
+            <>
+              <PositionDots position={bestPos} /> #{bestPos}
+            </>
+          ) : (
+            <span style={{ color: "var(--ink-3)" }}>—</span>
+          )}
+        </div>
+        <div
+          className="tm-qr-srcs mono"
+          title="competitor brands recommended · distinct sources cited (across LLMs)"
+        >
+          <span style={{ color: "var(--ink)", fontWeight: 700 }}>{recSet.size}</span>{" "}
+          rec
+          <span style={{ color: "var(--ink-3)" }}> · {urlSet.size} src</span>
+        </div>
+        <span className={`tm-badge ${badge.cls === "ba" ? "tm-b-inv" : badge.cls === "bw" ? "tm-b-weak" : "tm-b-held"}`}>
+          {badge.txt}
+        </span>
+      </button>
+
+      {open && (
+        <>
+          {llms.length > 1 && (
+            <div
+              role="tablist"
+              aria-label="LLM answers"
+              style={{
+                display: "flex",
+                gap: 0,
+                borderTop: "1px solid var(--grid)",
+                background: "var(--panel)",
+              }}
+            >
+              {llms.map((l) => {
+                const p = group.polls.get(l);
+                const on = shown === l;
+                return (
+                  <button
+                    key={l}
+                    role="tab"
+                    aria-selected={on}
+                    disabled={!p}
+                    onClick={() => setActiveLlm(l)}
+                    className="mono"
+                    style={{
+                      padding: "8px 16px",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: ".04em",
+                      background: on ? "var(--bg)" : "transparent",
+                      color: !p ? "var(--ink-3)" : on ? "var(--ink)" : "var(--ink-2)",
+                      border: "none",
+                      borderRight: "1px solid var(--grid)",
+                      borderBottom: on ? "2px solid var(--ink)" : "2px solid transparent",
+                      cursor: p ? "pointer" : "not-allowed",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {LLM_LABEL[l]}
+                    {p ? (
+                      <span
+                        style={{
+                          marginLeft: 6,
+                          color: p.brand_cited ? "var(--pos)" : "var(--hot)",
+                        }}
+                      >
+                        {p.brand_cited ? "✓" : "✗"}
+                      </span>
+                    ) : (
+                      <span style={{ marginLeft: 6 }}>—</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {poll ? (
+            <PollBody
+              poll={poll}
+              llm={shown!}
+              audit={audit}
+              ownNorm={ownNorm}
+              namedNorm={namedNorm}
+            />
+          ) : (
+            <div className="tm-empty" style={{ borderTop: "1px solid var(--grid)" }}>
+              No answers captured for this query.
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** One LLM's answer + influence + sources for the expanded query row. */
+function PollBody({
+  poll,
+  llm,
+  audit,
+  ownNorm,
+  namedNorm,
+}: {
+  poll: PollResult;
+  llm: LlmSource;
+  audit: Audit;
+  ownNorm: string;
+  namedNorm: Set<string>;
+}) {
+  const llmName = LLM_LABEL[llm];
   const citations = (poll.citations ?? []) as Citation[];
   const ordered =
     poll.raw_citations && poll.raw_citations.length > 0
@@ -370,178 +586,118 @@ function QueryRow({
   const compNames = recommended.map((r) => r.name);
 
   return (
-    <div className={`tm-qr ${stateClass} ${open ? "open" : ""}`}>
-      <button className="tm-qr-head" onClick={onToggle} aria-expanded={open}>
-        <span className="tm-tw" aria-hidden>
-          ▶
-        </span>
-        <div>
-          <div className="tm-qr-q">
-            {poll.query_text}
-            <span
-              className="mono"
-              style={{
-                marginLeft: 10,
-                fontSize: 9.5,
-                letterSpacing: ".05em",
-                fontWeight: 800,
-                padding: "2px 6px",
-                borderRadius: 2,
-                background: "var(--panel-2)",
-                color: "var(--ink-2)",
-                textTransform: "uppercase",
-              }}
-            >
-              {LLM_LABEL[normalizeLlm(poll.llm_source)]}
-            </span>
-          </div>
-          <div className="tm-qr-q sub">
-            {state === "absent"
-              ? "you're absent"
-              : state === "weak"
-                ? "cited but buried"
-                : "you're cited"}
-          </div>
+    <div className="tm-qr-body">
+      <div className="tm-answer">
+        <div className="lbl">
+          <span className="ai">{llmName.charAt(0)}</span> {llmName} answer · web search
         </div>
-        <div className="tm-qr-pos">
-          {poll.brand_position ? (
+        <div className="txt">
+          {poll.full_response
+            ? highlightAnswer(poll.full_response, audit.brand_name, compNames)
+            : poll.raw_response || "No answer text stored."}
+          {!poll.brand_cited && (
             <>
-              <PositionDots position={poll.brand_position} /> #{poll.brand_position}
+              {" "}
+              <span className="tm-none">
+                ⚑ {audit.brand_name} not mentioned in this answer
+              </span>
             </>
-          ) : (
-            <span style={{ color: "var(--ink-3)" }}>—</span>
           )}
         </div>
-        <div
-          className="tm-qr-srcs mono"
-          title="competitor brands recommended · sources cited"
-        >
-          <span style={{ color: "var(--ink)", fontWeight: 700 }}>
-            {recommended.length}
-          </span>{" "}
-          rec
-          <span style={{ color: "var(--ink-3)" }}> · {citations.length} src</span>
-        </div>
-        <span className={`tm-badge ${badge.cls === "ba" ? "tm-b-inv" : badge.cls === "bw" ? "tm-b-weak" : "tm-b-held"}`}>
-          {badge.txt}
-        </span>
-      </button>
 
-      {open && (
-        <div className="tm-qr-body">
-          <div className="tm-answer">
-            <div className="lbl">
-              <span className="ai">G</span> ChatGPT answer · web search
-            </div>
-            <div className="txt">
-              {poll.full_response
-                ? highlightAnswer(poll.full_response, audit.brand_name, compNames)
-                : poll.raw_response || "No answer text stored."}
-              {!poll.brand_cited && (
-                <>
-                  {" "}
-                  <span className="tm-none">
-                    ⚑ {audit.brand_name} not mentioned in this answer
-                  </span>
-                </>
-              )}
-            </div>
-
-            {/* Why ChatGPT NAMED these brands — led by which cited sources name them. */}
-            {poll.why_cited && poll.why_cited.length > 0 ? (
-              <div style={{ marginTop: 20 }}>
-                <div className="lbl">Why ChatGPT named these — and not you</div>
-                {poll.why_cited.map((w, i) => (
-                  <InfluenceBlock key={i} w={w} you={poll.own_page} />
-                ))}
-              </div>
-            ) : analyzing ? (
-              <div style={{ marginTop: 20 }}>
-                <div className="lbl">Why ChatGPT named these</div>
-                <p className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                  ◴ analyzing influence signals…
-                </p>
-              </div>
-            ) : analysisFailed ? (
-              <div style={{ marginTop: 20 }}>
-                <div className="lbl">Why ChatGPT named these</div>
-                <p style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                  Influence analysis unavailable for this run.
-                </p>
-              </div>
-            ) : null}
+        {/* Why the LLM NAMED these brands — led by which cited sources name them. */}
+        {poll.why_cited && poll.why_cited.length > 0 ? (
+          <div style={{ marginTop: 20 }}>
+            <div className="lbl">Why {llmName} named these — and not you</div>
+            {poll.why_cited.map((w, i) => (
+              <InfluenceBlock key={i} w={w} you={poll.own_page} />
+            ))}
           </div>
-          <div className="tm-srcs">
-            {/* Panel 1: the competitor signal — brands NAMED in the prose. */}
-            <div className="lbl" style={{ color: "var(--hot)" }}>
-              Recommended instead of you · {recommended.length}
-            </div>
-            {recommended.length === 0 ? (
-              <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 18 }}>
-                No competing products named in this answer.
-              </p>
-            ) : (
-              <div
+        ) : analyzing ? (
+          <div style={{ marginTop: 20 }}>
+            <div className="lbl">Why {llmName} named these</div>
+            <p className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              ◴ analyzing influence signals…
+            </p>
+          </div>
+        ) : analysisFailed ? (
+          <div style={{ marginTop: 20 }}>
+            <div className="lbl">Why {llmName} named these</div>
+            <p style={{ fontSize: 12, color: "var(--ink-3)" }}>
+              Influence analysis unavailable for this run.
+            </p>
+          </div>
+        ) : null}
+      </div>
+      <div className="tm-srcs">
+        {/* Panel 1: the competitor signal — brands NAMED in the prose. */}
+        <div className="lbl" style={{ color: "var(--hot)" }}>
+          Recommended instead of you · {recommended.length}
+        </div>
+        {recommended.length === 0 ? (
+          <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 18 }}>
+            No competing products named in this answer.
+          </p>
+        ) : (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 6,
+              marginBottom: 20,
+            }}
+          >
+            {recommended.map((r, i) => (
+              <span
+                key={i}
+                className="tm-chip"
+                title={r.tracked ? "tracked competitor" : "discovered — not on your list"}
                 style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 6,
-                  marginBottom: 20,
+                  background: r.tracked ? "var(--neg-bg)" : "var(--panel-2)",
+                  color: r.tracked ? "var(--neg)" : "var(--ink-2)",
                 }}
               >
-                {recommended.map((r, i) => (
-                  <span
-                    key={i}
-                    className="tm-chip"
-                    title={r.tracked ? "tracked competitor" : "discovered — not on your list"}
-                    style={{
-                      background: r.tracked ? "var(--neg-bg)" : "var(--panel-2)",
-                      color: r.tracked ? "var(--neg)" : "var(--ink-2)",
-                    }}
-                  >
-                    {r.name}
-                    {!r.tracked && (
-                      <small style={{ marginLeft: 5, opacity: 0.7, fontWeight: 700 }}>
-                        discovered
-                      </small>
-                    )}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {/* Panel 2: where ChatGPT sourced this — the "get listed" signal. */}
-            <div className="lbl">Where ChatGPT sourced this · {ordered.length}</div>
-            {ordered.length === 0 ? (
-              <p style={{ fontSize: 12, color: "var(--ink-3)" }}>
-                No live sources — answered from training.
-              </p>
-            ) : (
-              ordered.map((c, i) => {
-                const tag = tagSource(
-                  c as Citation,
-                  audit.domain,
-                  namedNorm,
-                  competitorJudged
-                );
-                void ownNorm;
-                return (
-                  <div className="tm-src" key={`${c.url}-${i}`}>
-                    <span className="o">{i + 1}</span>
-                    <div className="d">
-                      <a href={c.url} target="_blank" rel="noopener noreferrer">
-                        {c.domain}
-                      </a>
-                      <small>{tag.subtype}</small>
-                    </div>
-                    <SourceTag kind={tag.kind} />
-                  </div>
-                );
-              })
-            )}
+                {r.name}
+                {!r.tracked && (
+                  <small style={{ marginLeft: 5, opacity: 0.7, fontWeight: 700 }}>
+                    discovered
+                  </small>
+                )}
+              </span>
+            ))}
           </div>
-        </div>
-      )}
+        )}
+
+        {/* Panel 2: where this LLM sourced its answer — the "get listed" signal. */}
+        <div className="lbl">Where {llmName} sourced this · {ordered.length}</div>
+        {ordered.length === 0 ? (
+          <p style={{ fontSize: 12, color: "var(--ink-3)" }}>
+            No live sources — answered from training.
+          </p>
+        ) : (
+          ordered.map((c, i) => {
+            const tag = tagSource(
+              c as Citation,
+              audit.domain,
+              namedNorm,
+              competitorJudged
+            );
+            void ownNorm;
+            return (
+              <div className="tm-src" key={`${c.url}-${i}`}>
+                <span className="o">{i + 1}</span>
+                <div className="d">
+                  <a href={c.url} target="_blank" rel="noopener noreferrer">
+                    {c.domain}
+                  </a>
+                  <small>{tag.subtype}</small>
+                </div>
+                <SourceTag kind={tag.kind} />
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

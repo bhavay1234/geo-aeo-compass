@@ -1,5 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Workspace, useWorkspace } from "@/components/Workspace";
+import { llmsPolled } from "@/components/terminal/derive";
+import type { LlmSource } from "@/lib/db/types";
+
+const LLM_LABEL: Record<LlmSource, string> = {
+  chatgpt: "ChatGPT",
+  perplexity: "Perplexity",
+  gemini: "Gemini",
+};
 
 export const Route = createFileRoute("/settings")({
   head: () => ({ meta: [{ title: "Settings — Compass" }] }),
@@ -80,14 +88,19 @@ function SettingsInner() {
           <h2>◫ Tracking scope</h2>
           <span className="meta">this run</span>
         </div>
-        <Row label="Answer engine" value="ChatGPT · gpt-4o-search-preview" />
-        <Row label="Queries in audit" value={`${audit.progress_total}`} />
+        <Row
+          label="Answer engines"
+          value={llmsPolled(audit)
+            .map((l) => LLM_LABEL[l])
+            .join(" · ")}
+        />
+        <Row label="AI answers in audit" value={`${audit.progress_total}`} />
         <Row label="Status" value={audit.status} />
       </div>
 
       <p style={{ padding: "14px 18px", fontSize: 11, color: "var(--ink-3)" }}>
-        Compass tracks ChatGPT only. Configuration is fixed per run — start a new
-        audit from the launcher to change brand, competitors, or queries.
+        Configuration is fixed per run — start a new audit from the launcher to
+        change brand, competitors, or queries.
       </p>
     </div>
   );

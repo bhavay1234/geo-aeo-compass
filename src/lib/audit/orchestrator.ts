@@ -249,15 +249,17 @@ export async function computeSummary(
     .slice(0, 5)
     .map((p) => p.query_text);
 
+  // "answers" not "queries": multi-LLM audits have one poll per (query, llm),
+  // so total counts AI ANSWERS. visibility_rate = share of answers citing you.
   let headline: string;
   if (visibilityRate >= 0.7) {
-    headline = `${brandName} is cited in ${cited} of ${total} buyer queries on ChatGPT. Strong AEO position.`;
+    headline = `${brandName} is cited in ${cited} of ${total} AI answers to buyer queries. Strong AEO position.`;
   } else if (visibilityRate >= 0.4) {
-    headline = `${brandName} is cited in ${cited} of ${total} buyer queries. Visible, but losing comparison searches.`;
+    headline = `${brandName} is cited in ${cited} of ${total} AI answers. Visible, but losing comparison searches.`;
   } else if (visibilityRate >= 0.15) {
-    headline = `${brandName} is cited in only ${cited} of ${total} buyer queries. Major AEO gap.`;
+    headline = `${brandName} is cited in only ${cited} of ${total} AI answers to buyer queries. Major AEO gap.`;
   } else {
-    headline = `${brandName} is nearly invisible on ChatGPT — cited in just ${cited} of ${total} queries.`;
+    headline = `${brandName} is nearly invisible across AI answers — cited in just ${cited} of ${total}.`;
   }
 
   return {
@@ -893,18 +895,18 @@ export function buildInsightHeadline(
   const discovered = insights.discovered_competitor_count;
 
   // Discovered (unnamed) competitors are the most compelling finding —
-  // lead with them when present.
+  // lead with them when present. Counts are per AI ANSWER (query × LLM).
   if (discovered > 0) {
     const brands = discovered === 1 ? 'brand' : 'brands';
     const verb = discovered === 1 ? 'is' : 'are';
-    return `Cited in only ${x} of ${y} buyer queries — and ${discovered} ${brands} you didn't name ${verb} winning these answers.`;
+    return `Cited in only ${x} of ${y} AI answers — and ${discovered} ${brands} you didn't name ${verb} winning these answers.`;
   }
 
   const losing = insights.situation_distribution.losing_to_competitor;
   const open = insights.situation_distribution.open_opportunity;
 
   if (summary.visibility_rate >= 0.7) {
-    return `Cited in ${x} of ${y} buyer queries — strong AEO position, with ${open} open opportunities to extend.`;
+    return `Cited in ${x} of ${y} AI answers — strong AEO position, with ${open} open opportunities to extend.`;
   }
-  return `Cited in only ${x} of ${y} buyer queries — losing ${losing} to competitors, with ${open} open opportunities.`;
+  return `Cited in only ${x} of ${y} AI answers — losing ${losing} to competitors, with ${open} open opportunities.`;
 }

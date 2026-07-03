@@ -51,7 +51,7 @@ function ProgressPanel({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
           <span>
             {scoring
               ? "Computing your visibility score…"
-              : `Analyzing ${done} of ${total} queries…`}
+              : `Analyzing ${done} of ${total} AI answers…`}
           </span>
           <span style={{ fontWeight: 700, color: "var(--ink)" }}>{pct}%</span>
         </div>
@@ -59,8 +59,8 @@ function ProgressPanel({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
           <div className="fill" style={{ width: `${pct}%` }} />
         </div>
         <p style={{ marginTop: 12, fontSize: 11, color: "var(--ink-3)" }}>
-          Updates live. Each query is polled against ChatGPT with web search —
-          results render the moment the run completes.
+          Updates live. Each query is polled against ChatGPT, Perplexity and
+          Gemini with web search — results render the moment the run completes.
         </p>
       </div>
     </div>

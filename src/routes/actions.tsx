@@ -4,7 +4,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Workspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
 import { Meter } from "@/components/terminal/primitives";
-import { queryState, whoCited, type QueryState } from "@/components/terminal/derive";
+import {
+  queryState,
+  aggregateQueryState,
+  groupPollsByQuery,
+  llmsPolled,
+  whoCited,
+  type QueryState,
+} from "@/components/terminal/derive";
 import { updateNotes } from "@/lib/client/api";
 import type { Audit, PollResult, Suggestion } from "@/lib/db/types";
 
@@ -53,30 +60,42 @@ interface Action {
 }
 
 /**
- * Action + effort inherited from the influence analysis. The decisive factor is
- * usually CITATIONS, so the action is "get listed where ChatGPT sourced this",
- * not "make content". Returns null until citation analysis has run (→ caller
- * falls back to the deterministic suggestion).
+ * Action + effort inherited from the influence analysis, merged across ALL of
+ * the query's LLM rows. The decisive factor is usually CITATIONS, so the action
+ * is "get listed where the LLMs sourced this", not "make content". Returns null
+ * until citation analysis has run (→ caller falls back to the deterministic
+ * suggestion).
  */
-function refineAction(p: PollResult, query: string): { title: string; effort: number } | null {
-  const you = p.own_page;
-  const comps = p.why_cited ?? [];
-  if (!you || comps.length === 0) return null;
+function refineAction(
+  group: PollResult[],
+  query: string,
+  multiLlm: boolean
+): { title: string; effort: number } | null {
+  const withAnalysis = group.filter((p) => p.own_page && (p.why_cited ?? []).length > 0);
+  if (withAnalysis.length === 0) return null;
 
-  // Cited sources that name competitors but NOT us → the get-listed worklist.
-  const youUrls = new Set(you.named_in_sources.map((s) => s.url));
+  // Cited sources (across every LLM's answer) that name competitors but NOT
+  // us → the get-listed worklist. You-appear URLs unioned across LLM rows.
+  const youUrls = new Set<string>();
+  for (const p of withAnalysis)
+    for (const s of p.own_page?.named_in_sources ?? []) youUrls.add(s.url);
+
   const gaps = new Map<string, string>(); // domain -> source_type
-  for (const c of comps)
-    for (const s of c.named_in_sources)
-      if (!youUrls.has(s.url)) gaps.set(s.domain, s.source_type);
-
-  // Dominant decisive factor across the named competitors.
   const tally: Record<string, number> = {};
-  for (const c of comps) tally[c.decisive] = (tally[c.decisive] ?? 0) + 1;
+  let anyOwnPageExists = false;
+  for (const p of withAnalysis) {
+    if (p.own_page?.own_page?.exists) anyOwnPageExists = true;
+    for (const c of p.why_cited ?? []) {
+      tally[c.decisive] = (tally[c.decisive] ?? 0) + 1;
+      for (const s of c.named_in_sources)
+        if (!youUrls.has(s.url)) gaps.set(s.domain, s.source_type);
+    }
+  }
   const decisive = Object.entries(tally).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "citations";
+  const srcNoun = multiLlm ? "the LLMs" : "ChatGPT";
 
   if (decisive === "own_site") {
-    return you.own_page?.exists
+    return anyOwnPageExists
       ? {
           title: `Upgrade your page for “${query}” — competitors win on a dedicated, schema-rich page.`,
           effort: 3,
@@ -96,59 +115,69 @@ function refineAction(p: PollResult, query: string): { title: string; effort: nu
   const more = domains.length > 3 ? ` +${domains.length - 3} more` : "";
   const effort = Math.min(5, Math.max(2, Math.ceil(domains.length / 1.5)));
   return {
-    title: `Get listed where ChatGPT sourced this — ${list}${more} name competitors but not you.`,
+    title: `Get listed where ${srcNoun} sourced this — ${list}${more} name competitors but not you.`,
     effort,
   };
 }
 
 function ActionsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const SEV: Record<"high" | "medium" | "low", number> = { high: 3, medium: 2, low: 1 };
+  const multiLlm = llmsPolled(audit).length > 1;
 
-  // Dedupe to ONE action per query — with multi-LLM audits we get 3 polls per
-  // query (one per LLM). Prefer the highest-severity suggestion; among ties,
-  // prefer 'absent' state so the buyer sees the worst failure per query.
-  const byQuery = new Map<string, PollResult>();
-  for (const p of polls) {
-    if (!p.suggestion || p.suggestion.situation === "winning") continue;
-    const cur = byQuery.get(p.query_text);
-    if (!cur) {
-      byQuery.set(p.query_text, p);
-      continue;
-    }
-    const curSev = SEV[cur.suggestion!.severity] ?? 0;
-    const pSev = SEV[p.suggestion.severity] ?? 0;
-    if (pSev > curSev) {
-      byQuery.set(p.query_text, p);
-    } else if (pSev === curSev && !cur.brand_cited && p.brand_cited === false) {
-      // both absent — first wins.
-    } else if (pSev === curSev && cur.brand_cited && !p.brand_cited) {
-      byQuery.set(p.query_text, p);
-    }
-  }
+  // ONE action per query, merged across its LLM rows. The representative poll
+  // (for the fallback title/severity) is the worst one: highest severity,
+  // ties broken toward 'absent'.
+  const actions: Action[] = Array.from(groupPollsByQuery(polls).entries())
+    .map(([query, group]) => {
+      const actionable = group.filter(
+        (p) => p.suggestion && p.suggestion.situation !== "winning"
+      );
+      if (actionable.length === 0) return null;
 
-  const actions: Action[] = Array.from(byQuery.values())
-    .map((p) => {
-      const state = queryState(p);
-      const who = whoCited(p, audit.brand_name);
+      let rep = actionable[0];
+      for (const p of actionable.slice(1)) {
+        const repSev = SEV[rep.suggestion!.severity] ?? 0;
+        const pSev = SEV[p.suggestion!.severity] ?? 0;
+        if (pSev > repSev || (pSev === repSev && rep.brand_cited && !p.brand_cited)) {
+          rep = p;
+        }
+      }
+
+      // Aggregate signals across every LLM answer for this query.
+      const state = aggregateQueryState(
+        group.map(queryState),
+        llmsPolled(audit).length
+      );
+      const whoSet = new Map<string, string>();
+      const urlSet = new Set<string>();
+      for (const p of group) {
+        for (const nm of whoCited(p, audit.brand_name)) {
+          const k = nm.toLowerCase();
+          if (!whoSet.has(k)) whoSet.set(k, nm);
+        }
+        for (const c of p.citations ?? []) if (c.url) urlSet.add(c.url);
+      }
+      const who = Array.from(whoSet.values());
       const impact = state === "absent" ? 3 + Math.min(2, who.length) : 2;
-      const refined = refineAction(p, p.query_text);
+      const refined = refineAction(group, query, multiLlm);
       const effort = refined
         ? refined.effort
         : state === "absent"
           ? 4
           : 2; // pre-analysis heuristic
       return {
-        id: p.id,
-        query: p.query_text,
+        id: rep.id,
+        query,
         state,
-        title: refined ? refined.title : p.suggestion!.action,
+        title: refined ? refined.title : rep.suggestion!.action,
         who,
-        sources: (p.citations ?? []).length,
+        sources: urlSet.size,
         impact: Math.min(5, impact),
         effort,
-        severity: p.suggestion!.severity,
+        severity: rep.suggestion!.severity,
       };
     })
+    .filter((a): a is Action => a !== null)
     .sort((a, b) => b.impact * (6 - b.effort) - a.impact * (6 - a.effort));
 
   const high = actions.filter((a) => a.severity === "high").length;

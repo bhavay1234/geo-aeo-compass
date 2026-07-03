@@ -47,25 +47,35 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
-function subline(g: GapRow): { __html: string } {
+function subline(g: GapRow, multiLlm: boolean): { __html: string } {
   if (g.state === "absent") {
-    if (g.who.length === 0)
-      return { __html: `competitors cited — you're absent` };
+    const where = multiLlm ? `absent in all LLMs` : `you're absent`;
+    if (g.who.length === 0) return { __html: `competitors cited — ${where}` };
     const names =
       g.who.length > 3
         ? `<b>${g.who.length} competitors</b>`
         : `<b>${g.who.join(" · ")}</b>`;
-    return { __html: `${names} cited — you're absent` };
+    return { __html: `${names} recommended — ${where}` };
   }
-  if (g.state === "weak")
+  if (g.state === "weak") {
+    // Multi-LLM "weak" usually means partial coverage (cited in some LLMs,
+    // absent in others) — say that, not "buried", when it's the real story.
+    if (multiLlm && g.absentLlms.length > 0)
+      return {
+        __html: `cited in <b>${g.citedLlms.length}</b> of <b>${
+          g.citedLlms.length + g.absentLlms.length
+        }</b> LLMs · absent in ${g.absentLlms.join(", ")}`,
+      };
     return {
       __html: `cited <b>${g.position ? ordinal(g.position) : "low"}</b> · buried below the fold`,
     };
+  }
+  const everywhere = multiLlm ? ` in every LLM` : "";
   return {
     __html:
       g.position === 1
-        ? `cited <b>1st</b> · strong, defend this`
-        : `cited <b>${g.position ? ordinal(g.position) : ""}</b> · category fit`,
+        ? `cited <b>1st</b>${everywhere} · strong, defend this`
+        : `cited <b>${g.position ? ordinal(g.position) : ""}</b>${everywhere} · category fit`,
   };
 }
 
@@ -236,7 +246,7 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
               <span className="tm-rank">{String(i + 1).padStart(2, "0")}</span>
               <div className="tm-q">
                 <div className="t">{g.query}</div>
-                <div className="s" dangerouslySetInnerHTML={subline(g)} />
+                <div className="s" dangerouslySetInnerHTML={subline(g, llms.length > 1)} />
                 {llms.length > 1 && (
                   <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
                     {g.perLlm.map((c) => (

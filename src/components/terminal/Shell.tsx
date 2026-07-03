@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "./workspace-context";
 import { useTheme } from "./useTheme";
-import { allCompetitorBrands } from "./derive";
+import { allCompetitorBrands, groupPollsByQuery, llmsPolled } from "./derive";
 import type { Audit } from "@/lib/db/types";
 
 const TABS = [
@@ -23,13 +23,17 @@ const TABS = [
 ];
 
 function liveText(audit: Audit | null): string {
-  if (!audit) return "ChatGPT · web search";
+  const engines =
+    audit && llmsPolled(audit).length > 1
+      ? `${llmsPolled(audit).length} LLMs · web search`
+      : "ChatGPT · web search";
+  if (!audit) return engines;
   if (audit.status === "running" || audit.status === "pending")
-    return "ChatGPT · web search · running";
-  if (audit.status === "finalizing") return "ChatGPT · web search · scoring";
+    return `${engines} · running`;
+  if (audit.status === "finalizing") return `${engines} · scoring`;
   if (audit.completed_at)
-    return `ChatGPT · web search · ${formatDistanceToNow(new Date(audit.completed_at), { addSuffix: true })}`;
-  return "ChatGPT · web search";
+    return `${engines} · ${formatDistanceToNow(new Date(audit.completed_at), { addSuffix: true })}`;
+  return engines;
 }
 
 export function StatusBar() {
@@ -37,6 +41,10 @@ export function StatusBar() {
   const { theme, toggle } = useTheme();
 
   const score = audit?.visibility_score ?? null;
+  const llms = audit ? llmsPolled(audit) : [];
+  const multiLlm = llms.length > 1;
+  // Per-ANSWER counts: one answer per (query, LLM). On multi-LLM audits the
+  // cells are labeled accordingly so 5/18 reads as answers, not queries.
   const total = polls.length;
   const cited = polls.filter((p) => p.brand_cited).length;
   const blind = polls.filter((p) => !p.brand_cited).length;
@@ -104,14 +112,20 @@ export function StatusBar() {
           {delta == null ? "—" : delta >= 0 ? `+${delta}` : `${delta}`}
         </span>
       </div>
-      <div className="tm-cell">
-        <span className="l">Cited</span>
+      <div className="tm-cell" title="AI answers where your brand is cited (one answer per query per LLM)">
+        <span className="l">{multiLlm ? "Answers cited" : "Cited"}</span>
         <span className="v">{total ? `${cited}/${total}` : "—"}</span>
       </div>
-      <div className="tm-cell">
+      <div className="tm-cell" title="AI answers where your brand does not appear">
         <span className="l">Blind spots</span>
         <span className={`v ${blind > 0 ? "hot" : ""}`}>{total ? blind : "—"}</span>
       </div>
+      {multiLlm && (
+        <div className="tm-cell" title={llms.map((l) => l.toUpperCase()).join(" · ")}>
+          <span className="l">LLMs</span>
+          <span className="v">{llms.length}</span>
+        </div>
+      )}
 
       <div className="tm-spacer" />
       <div className="tm-live">
@@ -139,13 +153,19 @@ export function TabNav() {
   const loc = useLocation();
   const path = loc.pathname;
 
+  // Distinct QUERIES for the Queries/Actionables chips (multi-LLM audits have
+  // N polls per query; the tabs now show one row per query).
+  const queryCount = groupPollsByQuery(polls).size;
+  const actionQueries = new Set(
+    polls
+      .filter((p) => p.suggestion && p.suggestion.situation !== "winning")
+      .map((p) => p.query_text)
+  ).size;
   const counts: Record<string, number> = {
-    queries: polls.length,
+    queries: queryCount,
     citations: audit?.citation_analysis?.length ?? 0,
     competitors: audit ? allCompetitorBrands(audit, polls).length : 0,
-    actions: polls.filter(
-      (p) => p.suggestion && p.suggestion.situation !== "winning"
-    ).length,
+    actions: actionQueries,
   };
 
   return (

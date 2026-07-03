@@ -12,7 +12,7 @@ export const Route = createFileRoute("/")({
       { title: "Compass — AEO terminal" },
       {
         name: "description",
-        content: "Track how often ChatGPT cites your brand for buyer queries.",
+        content: "Track how often ChatGPT, Perplexity and Gemini cite your brand for buyer queries.",
       },
     ],
   }),
@@ -85,7 +85,7 @@ function Index() {
         </div>
         <div className="tm-cell">
           <span className="l">Engine</span>
-          <span className="v">ChatGPT</span>
+          <span className="v">3 LLMs</span>
         </div>
         <div className="tm-spacer" />
         <div className="tm-live">
@@ -103,7 +103,7 @@ function Index() {
         <div className="tm-panel tm-reveal">
           <div className="tm-phead">
             <h2>⚡ Run AEO audit</h2>
-            <span className="meta">ChatGPT · web search</span>
+            <span className="meta">ChatGPT · Perplexity · Gemini</span>
           </div>
           <div style={{ padding: "20px 18px" }}>
             <h1
@@ -115,11 +115,11 @@ function Index() {
                 lineHeight: 1.1,
               }}
             >
-              How visible is your brand inside ChatGPT?
+              How visible is your brand inside ChatGPT, Perplexity &amp; Gemini?
             </h1>
             <p className="nar" style={{ marginTop: 8, fontSize: 15, color: "var(--ink-2)", maxWidth: 520 }}>
               Enter your brand, the competitors you track, and the buyer queries
-              you care about. We poll ChatGPT for each and measure where you show up.
+              you care about. We poll ChatGPT, Perplexity and Gemini for each and measure where you show up.
             </p>
 
             <div
