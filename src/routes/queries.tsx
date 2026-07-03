@@ -7,6 +7,7 @@ import {
   queryState,
   tagSource,
   recommendedBrands,
+  normalizeLlm,
   type QueryState,
 } from "@/components/terminal/derive";
 import { normalizeDomain } from "@/lib/audit/source-classifier";
@@ -19,6 +20,12 @@ import type {
   DecisiveFactor,
   SourceType,
 } from "@/lib/db/types";
+
+const LLM_LABEL: Record<string, string> = {
+  chatgpt: "ChatGPT",
+  perplexity: "Perplexity",
+  gemini: "Gemini",
+};
 
 export const Route = createFileRoute("/queries")({
   head: () => ({ meta: [{ title: "Queries — Compass" }] }),
@@ -234,11 +241,22 @@ function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
       .filter(Boolean)
   );
 
+  // Sort by state, then group by query_text so the multi-LLM rows for a query
+  // sit adjacent to each other (visually the "3 LLMs asked, here are their
+  // answers" beat). Within a group, order by LLM (chatgpt → perplexity → gemini).
+  const LLM_ORDER: Record<string, number> = { chatgpt: 0, perplexity: 1, gemini: 2 };
   const rows = polls
     .map((p) => ({ p, state: queryState(p) }))
     .sort((a, b) => {
       const w = { absent: 3, weak: 2, held: 1 };
-      return w[b.state] - w[a.state];
+      const sd = w[b.state] - w[a.state];
+      if (sd !== 0) return sd;
+      const qcmp = a.p.query_text.localeCompare(b.p.query_text);
+      if (qcmp !== 0) return qcmp;
+      return (
+        (LLM_ORDER[normalizeLlm(a.p.llm_source)] ?? 9) -
+        (LLM_ORDER[normalizeLlm(b.p.llm_source)] ?? 9)
+      );
     });
 
   const counts = {
@@ -358,7 +376,25 @@ function QueryRow({
           ▶
         </span>
         <div>
-          <div className="tm-qr-q">{poll.query_text}</div>
+          <div className="tm-qr-q">
+            {poll.query_text}
+            <span
+              className="mono"
+              style={{
+                marginLeft: 10,
+                fontSize: 9.5,
+                letterSpacing: ".05em",
+                fontWeight: 800,
+                padding: "2px 6px",
+                borderRadius: 2,
+                background: "var(--panel-2)",
+                color: "var(--ink-2)",
+                textTransform: "uppercase",
+              }}
+            >
+              {LLM_LABEL[normalizeLlm(poll.llm_source)]}
+            </span>
+          </div>
           <div className="tm-qr-q sub">
             {state === "absent"
               ? "you're absent"

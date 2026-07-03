@@ -5,9 +5,21 @@ import { BleedBar, StatePill, Sparkline } from "@/components/terminal/primitives
 import {
   buildGapRows,
   computeShareOfVoice,
+  llmsPolled,
   type GapRow,
 } from "@/components/terminal/derive";
-import type { Audit, PollResult } from "@/lib/db/types";
+import type { Audit, PollResult, LlmSource } from "@/lib/db/types";
+
+const LLM_LABEL: Record<LlmSource, string> = {
+  chatgpt: "ChatGPT",
+  perplexity: "Perplexity",
+  gemini: "Gemini",
+};
+const LLM_SHORT: Record<LlmSource, string> = {
+  chatgpt: "GPT",
+  perplexity: "PPX",
+  gemini: "GEM",
+};
 
 export const Route = createFileRoute("/summary")({
   head: () => ({ meta: [{ title: "Summary — Compass" }] }),
@@ -62,11 +74,17 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const brand = audit.brand_name;
   const gaps = buildGapRows(audit, polls);
   const sovFull = computeShareOfVoice(audit, polls);
+  const llms = llmsPolled(audit);
 
-  const total = polls.length;
+  // total = distinct queries (one per gap row after per-query aggregation).
+  // Per-LLM answers = queries × LLMs — the buyer-facing denominator on multi-LLM
+  // audits ("invisible in N of {queries × 3} high-intent AI answers").
+  const total = gaps.length;
+  const totalAnswers = total * llms.length;
   const absent = gaps.filter((g) => g.state === "absent").length;
   const weak = gaps.filter((g) => g.state === "weak").length;
   const held = gaps.filter((g) => g.state === "held").length;
+  const absentAnswers = gaps.reduce((s, g) => s + g.absentLlms.length, 0);
 
   // Plain-language headline: inferred category + who leads citation share.
   const category = (audit.category ?? "").trim();
@@ -116,9 +134,26 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
       </>
     ) : null;
 
+  const acrossLlms =
+    llms.length > 1 ? (
+      <>
+        {" "}across <b>{llms.length} LLMs</b>
+      </>
+    ) : null;
+
   const verdict =
     total === 0 ? (
       <>Run in progress — no queries scored yet.</>
+    ) : absent > 0 && llms.length > 1 ? (
+      <>
+        <b style={{ color: "var(--you)" }}>{brand}</b> is{" "}
+        <b style={{ color: "var(--hot)" }}>invisible</b> in{" "}
+        <b style={{ color: "var(--hot)" }}>
+          {absentAnswers} of {totalAnswers}
+        </b>{" "}
+        high-intent AI answers{acrossLlms}
+        {compClause}.
+      </>
     ) : absent > 0 ? (
       <>
         <b style={{ color: "var(--you)" }}>{brand}</b> is{" "}
@@ -131,7 +166,7 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
     ) : weak > 0 ? (
       <>
         <b style={{ color: "var(--you)" }}>{brand}</b> is cited in all{" "}
-        <b>{total}</b> high-intent ChatGPT queries but ranks below the top on{" "}
+        <b>{total}</b> high-intent queries{acrossLlms} but ranks below the top on{" "}
         <b style={{ color: "var(--warn)" }}>{weak}</b>
         {topComps.length > 0 ? (
           <>
@@ -144,8 +179,8 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
     ) : (
       <>
         <b style={{ color: "var(--you)" }}>{brand}</b> is cited in{" "}
-        <b style={{ color: "var(--pos)" }}>all {total}</b> high-intent ChatGPT
-        queries
+        <b style={{ color: "var(--pos)" }}>all {total}</b> high-intent queries
+        {acrossLlms}
         {youEntry ? (
           <>
             {" "}and leads citation share at <b>{youEntry.pct}%</b>
@@ -183,7 +218,10 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
       <div className="tm-panel tm-gap-span tm-reveal">
         <div className="tm-phead">
           <h2>◧ Visibility gaps · ranked by lost demand</h2>
-          <span className="meta">{gaps.length} queries</span>
+          <span className="meta">
+            {gaps.length} queries
+            {llms.length > 1 ? ` × ${llms.length} LLMs` : ""}
+          </span>
         </div>
         {gaps.length === 0 ? (
           <div className="tm-empty">No queries scored in this run yet.</div>
@@ -199,6 +237,33 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
               <div className="tm-q">
                 <div className="t">{g.query}</div>
                 <div className="s" dangerouslySetInnerHTML={subline(g)} />
+                {llms.length > 1 && (
+                  <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+                    {g.perLlm.map((c) => (
+                      <span
+                        key={c.llm}
+                        title={`${LLM_LABEL[c.llm]} · ${
+                          c.cited
+                            ? `cited${c.position ? ` #${c.position}` : ""}`
+                            : "absent"
+                        }`}
+                        className="mono"
+                        style={{
+                          fontSize: 9,
+                          padding: "1px 5px",
+                          borderRadius: 2,
+                          fontWeight: 700,
+                          letterSpacing: ".04em",
+                          background: c.cited ? "var(--pos-bg)" : "var(--hot-bg)",
+                          color: c.cited ? "var(--pos)" : "var(--hot)",
+                        }}
+                      >
+                        {LLM_SHORT[c.llm]}
+                        {c.cited ? " ✓" : " ✗"}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
               <BleedBar state={g.state} seed={i} />
               <div className="tm-gstate">

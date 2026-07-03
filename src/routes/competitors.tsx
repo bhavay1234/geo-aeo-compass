@@ -5,6 +5,7 @@ import { SourceTag } from "@/components/terminal/primitives";
 import {
   buildCompetitorProfiles,
   influenceRollup,
+  llmsPolled,
   type CompetitorProfile,
   type InfluenceRollup,
 } from "@/components/terminal/derive";
@@ -45,12 +46,14 @@ const DECISIVE_LABEL: Record<DecisiveFactor, string> = {
 function CompetitorsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const profiles = buildCompetitorProfiles(audit, polls);
   const sovMax = Math.max(1, ...profiles.map((p) => p.sovPct));
+  const llmDenom = llmsPolled(audit).length;
 
   return (
     <div>
       <div className="tm-toolbar">
         <span className="tm-sort mono" style={{ paddingLeft: 16 }}>
           {profiles.length} brands · sorted by recommendation share
+          {llmDenom > 1 ? ` · ${llmDenom} LLMs` : ""}
         </span>
       </div>
       <div className="tm-rows">
@@ -60,6 +63,7 @@ function CompetitorsView({ audit, polls }: { audit: Audit; polls: PollResult[] }
             p={p}
             rank={i}
             sovMax={sovMax}
+            llmDenom={llmDenom}
             rollup={p.isYou ? null : influenceRollup(polls, p.name)}
           />
         ))}
@@ -72,11 +76,13 @@ function ProfileCard({
   p,
   rank,
   sovMax,
+  llmDenom,
   rollup,
 }: {
   p: CompetitorProfile;
   rank: number;
   sovMax: number;
+  llmDenom: number;
   rollup: InfluenceRollup | null;
 }) {
   return (
@@ -117,9 +123,24 @@ function ProfileCard({
         {p.discovered && (
           <span
             className="tm-tier tm-t2"
-            title="Surfaced by ChatGPT, not on your tracked list — re-run with it named to track it"
+            title="Surfaced by an LLM, not on your tracked list — re-run with it named to track it"
           >
             Discovered
+          </span>
+        )}
+        {!p.isYou && p.consensus.llmsNaming.length > 0 && llmDenom > 1 && (
+          <span
+            className="tm-tier"
+            style={
+              p.consensus.llmsNaming.length === llmDenom
+                ? { background: "var(--hot-bg)", color: "var(--hot)" }
+                : { background: "var(--warn-bg)", color: "var(--warn)" }
+            }
+            title={`Named by ${p.consensus.llmsNaming
+              .map((l) => l.toUpperCase())
+              .join(", ")}`}
+          >
+            {p.consensus.llmsNaming.length}/{llmDenom} LLMs
           </span>
         )}
         <span className={`tm-tier ${TIER_CLASS[p.tier]}`}>T{p.tier}</span>

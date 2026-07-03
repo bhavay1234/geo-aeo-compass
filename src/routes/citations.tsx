@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Workspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
 import { SourceTag } from "@/components/terminal/primitives";
-import type { SourceTagKind } from "@/components/terminal/derive";
+import { llmsPolled, type SourceTagKind } from "@/components/terminal/derive";
 import type {
   Audit,
   CitationAnalysisEntry,
@@ -44,8 +44,17 @@ function hint(t: SourceType): string {
   return "get listed here";
 }
 
-function Row({ e, rank }: { e: CitationAnalysisEntry; rank: number }) {
+function Row({
+  e,
+  rank,
+  llmCount,
+}: {
+  e: CitationAnalysisEntry;
+  rank: number;
+  llmCount: number;
+}) {
   const k = KIND[e.source_type] ?? KIND.other;
+  const citingCount = (e.llms_citing ?? []).length || 1;
   return (
     <div className="tm-card" style={{ position: "relative" }}>
       <span
@@ -63,7 +72,7 @@ function Row({ e, rank }: { e: CitationAnalysisEntry; rank: number }) {
           {String(rank).padStart(2, "0")}
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <a
               href={e.url}
               target="_blank"
@@ -73,9 +82,29 @@ function Row({ e, rank }: { e: CitationAnalysisEntry; rank: number }) {
               {e.domain}
             </a>
             <SourceTag kind={k.kind} />
+            {llmCount > 1 && citingCount >= 2 && (
+              <span
+                className="mono"
+                style={{
+                  fontSize: 9.5,
+                  fontWeight: 800,
+                  letterSpacing: ".05em",
+                  padding: "2px 6px",
+                  borderRadius: 2,
+                  background: "var(--warn-bg)",
+                  color: "var(--warn)",
+                  textTransform: "uppercase",
+                }}
+                title="Cited by multiple LLMs — a universal citation source"
+              >
+                Universal · {citingCount}/{llmCount}
+              </span>
+            )}
           </div>
           <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 3 }}>
-            cited in {e.query_count} quer{e.query_count === 1 ? "y" : "ies"}
+            cited by <b style={{ color: "var(--ink-2)" }}>{citingCount}/{llmCount}</b>{" "}
+            LLM{llmCount === 1 ? "" : "s"} · across {e.query_count} quer
+            {e.query_count === 1 ? "y" : "ies"}
             {!e.brand_present && ` · ${hint(e.source_type)}`}
           </div>
         </div>
@@ -96,6 +125,10 @@ function Row({ e, rank }: { e: CitationAnalysisEntry; rank: number }) {
 
 function CitationsView({ audit }: { audit: Audit }) {
   const entries = audit.citation_analysis ?? [];
+  const llmCount = llmsPolled(audit).length;
+  const universalMissing = entries.filter(
+    (e) => !e.brand_present && (e.llms_citing ?? []).length >= 2
+  );
   const recentlyCompleted =
     !!audit.completed_at &&
     Date.now() - new Date(audit.completed_at).getTime() < 5 * 60_000;
@@ -134,12 +167,35 @@ function CitationsView({ audit }: { audit: Audit }) {
           className="nar"
           style={{ fontSize: 22, lineHeight: 1.42, fontWeight: 500, color: "var(--ink-2)", maxWidth: 1040 }}
         >
-          ChatGPT cited <b style={{ color: "var(--ink)" }}>{entries.length}</b>{" "}
-          source{entries.length === 1 ? "" : "s"} across these queries — you appear on{" "}
-          <b style={{ color: present.length > 0 ? "var(--pos)" : "var(--hot)" }}>
-            {present.length}
-          </b>{" "}
-          of them.
+          {llmCount > 1 ? (
+            <>
+              <b style={{ color: "var(--ink)" }}>{llmCount} LLMs</b> collectively
+              cited <b style={{ color: "var(--ink)" }}>{entries.length}</b> source
+              {entries.length === 1 ? "" : "s"} — you appear on{" "}
+              <b style={{ color: present.length > 0 ? "var(--pos)" : "var(--hot)" }}>
+                {present.length}
+              </b>{" "}
+              of them
+              {universalMissing.length > 0 ? (
+                <>
+                  {" "}·{" "}
+                  <b style={{ color: "var(--hot)" }}>{universalMissing.length}</b>{" "}
+                  are cited by multiple LLMs but missing you
+                </>
+              ) : null}
+              .
+            </>
+          ) : (
+            <>
+              ChatGPT cited <b style={{ color: "var(--ink)" }}>{entries.length}</b>{" "}
+              source{entries.length === 1 ? "" : "s"} across these queries — you appear
+              on{" "}
+              <b style={{ color: present.length > 0 ? "var(--pos)" : "var(--hot)" }}>
+                {present.length}
+              </b>{" "}
+              of them.
+            </>
+          )}
           {analyzing && (
             <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 10 }}>
               ◴ analyzing…
@@ -147,8 +203,10 @@ function CitationsView({ audit }: { audit: Audit }) {
           )}
         </p>
         <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 6 }}>
-          Where ChatGPT sources its answers, and whether you're on the page. Missing
-          aggregators &amp; review directories are your get-listed worklist.
+          Where the LLMs source their answers, and whether you're on the page.
+          {llmCount > 1
+            ? " Sources cited by multiple LLMs are the highest-leverage places to get listed."
+            : " Missing aggregators & review directories are your get-listed worklist."}
         </p>
       </div>
 
@@ -160,7 +218,7 @@ function CitationsView({ audit }: { audit: Audit }) {
           </div>
           <div className="tm-rows">
             {missing.map((e, i) => (
-              <Row key={e.url} e={e} rank={i + 1} />
+              <Row key={e.url} e={e} rank={i + 1} llmCount={llmCount} />
             ))}
           </div>
         </>
@@ -174,7 +232,7 @@ function CitationsView({ audit }: { audit: Audit }) {
           </div>
           <div className="tm-rows">
             {present.map((e, i) => (
-              <Row key={e.url} e={e} rank={i + 1} />
+              <Row key={e.url} e={e} rank={i + 1} llmCount={llmCount} />
             ))}
           </div>
         </>
