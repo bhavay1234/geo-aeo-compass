@@ -21,6 +21,32 @@ export interface QueueMessageLike<T> {
   body: T;
 }
 
+/**
+ * Append a poll-failure breadcrumb to audits.error_message so failures are
+ * diagnosable straight from the DB (no Cloudflare log access needed). Keeps
+ * the last ~1000 chars; never throws — diagnostics must not break the run.
+ */
+async function recordPollFailure(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  auditId: string,
+  llm: string,
+  reason: unknown
+): Promise<void> {
+  try {
+    const { data } = await supabase
+      .from('audits')
+      .select('error_message')
+      .eq('id', auditId)
+      .single();
+    const prev = (data?.error_message as string | null) ?? '';
+    const entry = `[${llm}] ${String(reason).slice(0, 160)}`;
+    const next = (prev ? `${prev} | ${entry}` : entry).slice(-1000);
+    await supabase.from('audits').update({ error_message: next }).eq('id', auditId);
+  } catch {
+    // best-effort only
+  }
+}
+
 /** Case-insensitive whole-word match. Used for uncited mention detection. */
 function mentionsWord(text: string, word: string): boolean {
   const w = word.trim();
@@ -111,6 +137,7 @@ export async function processQueueBatch(
         // still completes; the UI renders the missing LLM as "no answer".
         if (result.error && !result.response_text) {
           console.error(`[poll:${llm}] failed for "${query_text.slice(0, 40)}":`, result.error);
+          await recordPollFailure(supabase, audit_id, llm, result.error);
           await supabase.rpc('increment_progress', { audit_id_param: audit_id });
           progressed = true;
           return;
@@ -208,6 +235,12 @@ export async function processQueueBatch(
         // is already swallowed (message acked, no Cloudflare retry), so this
         // never double-counts with a retry.
         if (!progressed) {
+          await recordPollFailure(
+            supabase,
+            audit_id,
+            msg.body.llm_source ?? 'chatgpt',
+            err?.message || String(err)
+          );
           try {
             await supabase.rpc('increment_progress', { audit_id_param: audit_id });
           } catch (e: any) {
