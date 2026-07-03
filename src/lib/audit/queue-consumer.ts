@@ -1,11 +1,12 @@
 import { pollChatGPT } from '../llm/openai-client';
+import { pollPerplexity, pollGemini } from '../llm/dataforseo-client';
 import { parseCitations } from './citation-parser';
 import { classifySource, competitorToDomain } from './source-classifier';
 import { buildSuggestion } from './suggestion-engine';
 import { getSupabaseAdmin } from '../db/supabase';
 import { finalizeAuditFast, enrichAudit } from './orchestrator';
 import { analyzeCitations } from './citation-analysis';
-import type { Citation, InlineCitation } from '../db/types';
+import type { Citation, InlineCitation, LlmSource } from '../db/types';
 import type { Env, AuditQueueMessage } from '../db/supabase';
 
 /**
@@ -73,11 +74,19 @@ export async function processQueueBatch(
 
         const competitorList = (audit.competitors as string[]) || [];
 
-        const result = await pollChatGPT(query_text, env);
+        // Dispatch to the right LLM poller. Default 'chatgpt' keeps legacy
+        // single-LLM messages (no llm_source field) working unchanged.
+        const llm: LlmSource = (msg.body.llm_source ?? 'chatgpt') as LlmSource;
+        const result =
+          llm === 'perplexity'
+            ? await pollPerplexity(query_text, env)
+            : llm === 'gemini'
+              ? await pollGemini(query_text, env)
+              : await pollChatGPT(query_text, env);
         console.log(
-          '[citations]',
+          `[poll:${llm}]`,
           result.citations.length,
-          'for',
+          'citations for',
           query_text.slice(0, 40)
         );
 
@@ -140,7 +149,7 @@ export async function processQueueBatch(
           audit_id,
           query_text,
           query_category,
-          llm_source: 'openai',
+          llm_source: llm,
           raw_response: fullResponse.slice(0, 5000),
           full_response: fullResponse,
           brand_cited: citation.brand_cited,

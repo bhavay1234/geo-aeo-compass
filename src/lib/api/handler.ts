@@ -58,9 +58,18 @@ export async function handleApiRoute(request: Request): Promise<Response> {
         return jsonError(400, 'No valid queries provided');
       }
 
-      // Insert audit row already in 'running' state with the dynamic query
-      // count as progress_total — the queue consumer increments progress_done
-      // per message and finalizes when done >= total.
+      // Multi-LLM fan-out: each query is polled against N LLMs, one row per
+      // (query, llm) in poll_results. Cross-LLM aggregations later derive
+      // consensus + universal-source rank. Kept small (3) so the demo audit
+      // stays snappy and DFS + OpenAI costs stay bounded.
+      const LLMS: Array<'chatgpt' | 'perplexity' | 'gemini'> = [
+        'chatgpt',
+        'perplexity',
+        'gemini',
+      ];
+
+      // Insert audit row already in 'running' state. progress_total counts
+      // queries × LLMs — the consumer increments per (query, llm) poll.
       const { data: audit, error } = await supabase
         .from('audits')
         .insert({
@@ -69,8 +78,9 @@ export async function handleApiRoute(request: Request): Promise<Response> {
           category,
           competitors,
           status: 'running',
-          progress_total: cleaned.length,
+          progress_total: cleaned.length * LLMS.length,
           progress_done: 0,
+          llms_polled: LLMS,
         })
         .select()
         .single();
@@ -81,17 +91,20 @@ export async function handleApiRoute(request: Request): Promise<Response> {
 
       const auditId = audit.id as string;
 
-      // Fan out to the queue — one message per cleaned query. Marked
+      // Fan out to the queue — one message per (query × llm). Marked
       // query_category 'user' since these aren't from the generated bank.
       try {
         await Promise.all(
-          cleaned.map((q, i) =>
-            env.AUDIT_QUEUE.send({
-              audit_id: auditId,
-              query_text: q,
-              query_category: 'user',
-              query_index: i,
-            })
+          cleaned.flatMap((q, i) =>
+            LLMS.map((llm) =>
+              env.AUDIT_QUEUE.send({
+                audit_id: auditId,
+                query_text: q,
+                query_category: 'user',
+                query_index: i,
+                llm_source: llm,
+              })
+            )
           )
         );
       } catch (enqueueErr: any) {

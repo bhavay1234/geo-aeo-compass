@@ -9,9 +9,12 @@ export interface AuditQueueMessage {
   query_text: string;
   query_category: string;
   query_index: number;
-  /** 'query' (default) = poll ChatGPT for this query. 'citations' = run the
+  /** 'query' (default) = poll one LLM for this query. 'citations' = run the
    *  post-finalize citation/why-cited analysis stage for the whole audit. */
   kind?: "query" | "citations";
+  /** Which LLM to poll for this query message. Defaults to 'chatgpt' for
+   *  backward-compat with legacy single-LLM audits. */
+  llm_source?: "chatgpt" | "perplexity" | "gemini";
 }
 
 /**
@@ -39,6 +42,10 @@ export type Env = {
   OPENAI_API_KEY: string;
   /** Apify API token — Worker secret + .dev.vars. Never log or expose. */
   APIFY_TOKEN: string;
+  /** DataForSEO Basic-Auth credentials (login/password). Powers the Perplexity
+   *  + Gemini pollers alongside our direct OpenAI ChatGPT path. */
+  DATAFORSEO_LOGIN: string;
+  DATAFORSEO_PASSWORD: string;
   AUDIT_QUEUE: QueueBinding<AuditQueueMessage>;
 };
 

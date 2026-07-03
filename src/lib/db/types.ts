@@ -252,7 +252,13 @@ export interface Audit {
   completed_at: string | null;
   citation_analysis: CitationAnalysisEntry[];
   citation_status: "analyzing" | "done" | "failed" | null;
+  /** Which LLMs this audit polled — the denominator for cross-LLM signals
+   *  (consensus per brand, universal citation sources). */
+  llms_polled: LlmSource[];
 }
+
+/** Distinguishes rows in poll_results (one poll per query per LLM). */
+export type LlmSource = "chatgpt" | "perplexity" | "gemini";
 
 export interface PollResult {
   id: string;
