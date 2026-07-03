@@ -60,6 +60,12 @@ export async function processQueueBatch(
 
       auditIdsToCheck.add(audit_id);
 
+      // Set true once increment_progress has run, so the catch below never
+      // double-counts and a FAILED poll still advances the audit. Without
+      // this, a persistently failing LLM (bad DFS creds, missing OpenAI key)
+      // wedges the audit at progress_done < progress_total forever.
+      let progressed = false;
+
       try {
         const { data: audit, error: auditErr } = await supabase
           .from('audits')
@@ -89,6 +95,17 @@ export async function processQueueBatch(
           'citations for',
           query_text.slice(0, 40)
         );
+
+        // Poll failed (empty answer + error) → do NOT insert a fake "absent"
+        // row (that would poison the data with brand_cited=false for an answer
+        // that never happened). Count the message as processed so the audit
+        // still completes; the UI renders the missing LLM as "no answer".
+        if (result.error && !result.response_text) {
+          console.error(`[poll:${llm}] failed for "${query_text.slice(0, 40)}":`, result.error);
+          await supabase.rpc('increment_progress', { audit_id_param: audit_id });
+          progressed = true;
+          return;
+        }
 
         const citation = parseCitations(
           result.response_text,
@@ -168,6 +185,7 @@ export async function processQueueBatch(
         await supabase.rpc('increment_progress', {
           audit_id_param: audit_id,
         });
+        progressed = true;
 
         console.log(`[queue] processed: ${query_text.slice(0, 60)}`);
       } catch (err: any) {
@@ -175,6 +193,18 @@ export async function processQueueBatch(
           `[queue] error processing query "${query_text}":`,
           err?.message || err
         );
+        // A thrown poll (e.g. DFS client throws on bad credentials) must still
+        // advance progress, or the audit never reaches progress_done >=
+        // progress_total and hangs at "running" forever. The per-message error
+        // is already swallowed (message acked, no Cloudflare retry), so this
+        // never double-counts with a retry.
+        if (!progressed) {
+          try {
+            await supabase.rpc('increment_progress', { audit_id_param: audit_id });
+          } catch (e: any) {
+            console.error(`[queue] failed to advance progress for ${audit_id}:`, e?.message);
+          }
+        }
       }
     })
   );
