@@ -51,6 +51,29 @@ async function callDFS(path: string, body: unknown, env: Env): Promise<unknown> 
   }
 }
 
+/**
+ * ChatGPT via DataForSEO — used when OPENAI_API_KEY is not configured, so the
+ * whole tool can run on DFS credentials alone. Same normalized result shape as
+ * the direct-OpenAI poller.
+ */
+export async function pollChatGPTviaDFS(
+  query: string,
+  env: Env
+): Promise<OpenAIPollResult> {
+  const data = await callDFS(
+    '/ai_optimization/chat_gpt/llm_responses/live',
+    [
+      {
+        user_prompt: query,
+        model_name: 'gpt-4o',
+        web_search: true,
+      },
+    ],
+    env
+  );
+  return normalize(data, 'chatgpt', 'gpt-4o (dataforseo)');
+}
+
 export async function pollPerplexity(
   query: string,
   env: Env

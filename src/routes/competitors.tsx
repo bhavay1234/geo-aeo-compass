@@ -186,17 +186,15 @@ function ProfileCard({
         </div>
       )}
 
-      {/* Verdict — the headline unit */}
-      <div style={{ marginTop: 14 }}>
-        <div className="tm-label">How ChatGPT describes them</div>
-        {p.verdict ? (
+      {/* Verdict — the headline unit. Hidden entirely when unavailable
+          (e.g. running without an OpenAI key) — an empty panel reads as
+          broken, a permanent "scoring…" reads as stuck. */}
+      {p.verdict && (
+        <div style={{ marginTop: 14 }}>
+          <div className="tm-label">How the LLMs describe them</div>
           <p className="tm-verdict">“{p.verdict}”</p>
-        ) : (
-          <p style={{ fontSize: 13, color: "var(--ink-3)" }}>
-            No verdict yet — scoring.
-          </p>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* Strengths */}
       {p.strengths.length > 0 && (

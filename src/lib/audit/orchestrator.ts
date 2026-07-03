@@ -1,6 +1,7 @@
 import { pollChatGPT } from '../llm';
 import { parseCitations } from './citation-parser';
 import { generateQueries, type BuyerQuery } from './query-bank';
+import { extractProseBrands } from './prose-brands';
 import { competitorToDomain, normalizeDomain } from './source-classifier';
 import {
   inferPositioning,
@@ -710,21 +711,31 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
           })
           .eq('id', poll.id);
         // brands_named (0009) isolated so an unmigrated column can't drop the
-        // roles/discovery write above.
+        // roles/discovery write above. When the LLM extraction is unavailable
+        // (no OPENAI_API_KEY) or came back empty, fall back to deterministic
+        // prose extraction (bold spans / headings / numbered leads) so the
+        // competitor signal survives an OpenAI-free deployment.
+        const effectiveBrands = llm?.brandsNamed?.length
+          ? llm.brandsNamed
+          : extractProseBrands(poll.full_response || '', brandName);
         await supabase
           .from('poll_results')
-          .update({ brands_named: llm?.brandsNamed ?? [] })
+          .update({ brands_named: effectiveBrands })
           .eq('id', poll.id);
       })
     );
 
     // Competitor signal = BRANDS NAMED in prose (not cited domains). Aggregate
     // the run's named brands; "discovered" = named in an answer but not tracked.
+    // Same LLM-or-prose fallback as the per-poll write above.
     const ownLower = brandName.trim().toLowerCase();
     const namedLower = new Set(namedCompetitors.map((n) => n.trim().toLowerCase()));
     const brandsNamedAll = new Map<string, string>(); // lower -> display
-    for (const { llm } of perQuery) {
-      for (const b of llm?.brandsNamed ?? []) {
+    for (const { poll, llm } of perQuery) {
+      const effective = llm?.brandsNamed?.length
+        ? llm.brandsNamed
+        : extractProseBrands(poll.full_response || '', brandName);
+      for (const b of effective) {
         const nm = b.trim();
         const k = nm.toLowerCase();
         if (!nm || k === ownLower || brandsNamedAll.has(k)) continue;

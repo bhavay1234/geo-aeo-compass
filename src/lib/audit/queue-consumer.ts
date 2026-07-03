@@ -1,5 +1,9 @@
 import { pollChatGPT } from '../llm/openai-client';
-import { pollPerplexity, pollGemini } from '../llm/dataforseo-client';
+import {
+  pollPerplexity,
+  pollGemini,
+  pollChatGPTviaDFS,
+} from '../llm/dataforseo-client';
 import { parseCitations } from './citation-parser';
 import { classifySource, competitorToDomain } from './source-classifier';
 import { buildSuggestion } from './suggestion-engine';
@@ -82,13 +86,18 @@ export async function processQueueBatch(
 
         // Dispatch to the right LLM poller. Default 'chatgpt' keeps legacy
         // single-LLM messages (no llm_source field) working unchanged.
+        // ChatGPT: direct OpenAI when OPENAI_API_KEY is configured (richer
+        // inline-citation annotations), DataForSEO otherwise — the tool runs
+        // fully on DFS credentials alone.
         const llm: LlmSource = (msg.body.llm_source ?? 'chatgpt') as LlmSource;
         const result =
           llm === 'perplexity'
             ? await pollPerplexity(query_text, env)
             : llm === 'gemini'
               ? await pollGemini(query_text, env)
-              : await pollChatGPT(query_text, env);
+              : env.OPENAI_API_KEY
+                ? await pollChatGPT(query_text, env)
+                : await pollChatGPTviaDFS(query_text, env);
         console.log(
           `[poll:${llm}]`,
           result.citations.length,
