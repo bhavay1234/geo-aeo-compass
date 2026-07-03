@@ -102,8 +102,31 @@ function refineAction(p: PollResult, query: string): { title: string; effort: nu
 }
 
 function ActionsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
-  const actions: Action[] = polls
-    .filter((p) => p.suggestion && p.suggestion.situation !== "winning")
+  const SEV: Record<"high" | "medium" | "low", number> = { high: 3, medium: 2, low: 1 };
+
+  // Dedupe to ONE action per query — with multi-LLM audits we get 3 polls per
+  // query (one per LLM). Prefer the highest-severity suggestion; among ties,
+  // prefer 'absent' state so the buyer sees the worst failure per query.
+  const byQuery = new Map<string, PollResult>();
+  for (const p of polls) {
+    if (!p.suggestion || p.suggestion.situation === "winning") continue;
+    const cur = byQuery.get(p.query_text);
+    if (!cur) {
+      byQuery.set(p.query_text, p);
+      continue;
+    }
+    const curSev = SEV[cur.suggestion!.severity] ?? 0;
+    const pSev = SEV[p.suggestion.severity] ?? 0;
+    if (pSev > curSev) {
+      byQuery.set(p.query_text, p);
+    } else if (pSev === curSev && !cur.brand_cited && p.brand_cited === false) {
+      // both absent — first wins.
+    } else if (pSev === curSev && cur.brand_cited && !p.brand_cited) {
+      byQuery.set(p.query_text, p);
+    }
+  }
+
+  const actions: Action[] = Array.from(byQuery.values())
     .map((p) => {
       const state = queryState(p);
       const who = whoCited(p, audit.brand_name);
