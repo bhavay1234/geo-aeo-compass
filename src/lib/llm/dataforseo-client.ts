@@ -65,13 +65,13 @@ export async function pollChatGPTviaDFS(
     [
       {
         user_prompt: query,
-        model_name: 'gpt-4o',
+        model_name: 'gpt-5.3-chat-latest',
         web_search: true,
       },
     ],
     env
   );
-  return normalize(data, 'chatgpt', 'gpt-4o (dataforseo)');
+  return normalize(data, 'chatgpt', 'gpt-5.3-chat-latest (dataforseo)');
 }
 
 export async function pollPerplexity(
@@ -101,13 +101,13 @@ export async function pollGemini(
     [
       {
         user_prompt: query,
-        model_name: 'gemini-2.0-flash',
+        model_name: 'gemini-2.5-flash',
         web_search: true,
       },
     ],
     env
   );
-  return normalize(data, 'gemini', 'gemini-2.0-flash');
+  return normalize(data, 'gemini', 'gemini-2.5-flash');
 }
 
 // ── normalization ──────────────────────────────────────────────────────────
@@ -116,23 +116,44 @@ interface AnyObj {
   [k: string]: unknown;
 }
 
-function pickAnswerText(item: AnyObj): string {
-  // DFS field names vary between LLMs/versions — try the common ones in order.
-  const candidates = [
-    item.response,
-    item.answer,
-    item.text,
-    item.content,
-    (item.message as AnyObj | undefined)?.content,
-  ];
-  for (const c of candidates) if (typeof c === 'string' && c.trim()) return c;
-  return '';
-}
-
-function pickReferences(item: AnyObj): AnyObj[] {
-  const candidates = [item.references, item.citations, item.links, item.sources];
-  for (const c of candidates) if (Array.isArray(c)) return c as AnyObj[];
-  return [];
+/**
+ * Extract answer text + ordered {url,title} annotations from DFS llm_responses
+ * items. Verified live shape (all three LLMs share it):
+ *   result[0].items[] = { type: "message",
+ *     sections: [{ type: "text", text: "...", annotations: [{url,title}] }] }
+ * The legacy flat-field fallbacks are kept for shape drift across DFS versions.
+ */
+function extractFromItems(items: AnyObj[]): { text: string; refs: AnyObj[] } {
+  let text = '';
+  const refs: AnyObj[] = [];
+  for (const item of items) {
+    const sections = item.sections as AnyObj[] | undefined;
+    if (Array.isArray(sections)) {
+      for (const sec of sections) {
+        if (typeof sec.text === 'string' && sec.text.trim()) {
+          text += (text ? '\n\n' : '') + sec.text;
+        }
+        const anns = sec.annotations as AnyObj[] | undefined;
+        if (Array.isArray(anns)) refs.push(...anns);
+      }
+      continue;
+    }
+    // Legacy/fallback flat fields.
+    const flat = [item.response, item.answer, item.text, item.content,
+      (item.message as AnyObj | undefined)?.content];
+    for (const c of flat)
+      if (typeof c === 'string' && c.trim()) {
+        text += (text ? '\n\n' : '') + c;
+        break;
+      }
+    const flatRefs = [item.references, item.citations, item.links, item.sources];
+    for (const c of flatRefs)
+      if (Array.isArray(c)) {
+        refs.push(...(c as AnyObj[]));
+        break;
+      }
+  }
+  return { text, refs };
 }
 
 function normalize(
@@ -146,10 +167,8 @@ function normalize(
   const result = (t0.result as AnyObj[] | undefined) ?? [];
   const r0 = result[0] ?? {};
   const items = (r0.items as AnyObj[] | undefined) ?? [r0];
-  const item = items[0] ?? {};
 
-  const response_text = pickAnswerText(item);
-  const references = pickReferences(item);
+  const { text: response_text, refs: references } = extractFromItems(items);
 
   const citations: RawCitation[] = [];
   const raw_citations: RawInlineCitation[] = [];
