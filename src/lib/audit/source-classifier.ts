@@ -133,6 +133,28 @@ const LISTICLE_URL =
 /** Product-review URL pattern (a review section on any host). */
 const REVIEW_URL = /\/reviews?\//i;
 
+/**
+ * A review-site page ABOUT ONE product (a competitor's profile / reviews page) —
+ * NOT a directory you can list yourself in. Deterministic URL patterns for the
+ * major review sites: g2.com/products/x, capterra.com/p/…, softwareadvice.com/
+ * cat/x-profile, getapp.com/cat/a/x, trustradius.com/products/x, etc. Category/
+ * directory pages (g2.com/categories/x, capterra.com/x-software) do NOT match.
+ */
+export function isSingleProductPage(url: string): boolean {
+  const u = (url || '').toLowerCase();
+  return (
+    /g2\.com\/products\//.test(u) ||
+    /capterra\.com\/p\//.test(u) ||
+    /getapp\.com\/[a-z0-9-]+\/a\//.test(u) ||
+    /softwareadvice\.com\/[a-z0-9-]+\/[a-z0-9-]+-profile/.test(u) ||
+    /trustradius\.com\/products\/[a-z0-9-]+\//.test(u) ||
+    /sourceforge\.net\/software\/product\//.test(u) ||
+    /slashdot\.org\/software\/p\//.test(u) ||
+    /gartner\.com\/reviews\/market\/[a-z0-9-]+\/vendor\//.test(u) ||
+    /trustpilot\.com\/review\//.test(u)
+  );
+}
+
 /** True if `d` is, or is a subdomain of, any competitor domain in the set. */
 function inDomainSet(d: string, set: Set<string> | undefined): boolean {
   if (!set || set.size === 0) return false;

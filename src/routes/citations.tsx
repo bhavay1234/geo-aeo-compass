@@ -8,7 +8,7 @@ import {
   categorizeCitations,
   type SourceTagKind,
 } from "@/components/terminal/derive";
-import { normalizeDomain } from "@/lib/audit/source-classifier";
+import { normalizeDomain, isSingleProductPage } from "@/lib/audit/source-classifier";
 import type { CitationCategory } from "@/lib/audit/source-classifier";
 import type {
   Audit,
@@ -344,6 +344,9 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   // reviews — techradar hosts off-niche reviews/news). Keyword fallback only for
   // listicles on pre-classifier audits.
   const nicheOk = (g: (typeof groups)[number], e: CitationAnalysisEntry): boolean => {
+    // A rival's single-product review/profile page is never get-listable —
+    // deterministic guard, independent of the LLM verdict.
+    if (isSingleProductPage(e.resolved_url || e.url)) return false;
     if (typeof e.niche_relevant === "boolean") return e.niche_relevant;
     return g.key === "listicles" ? isNicheRelevantKeyword(e) : true;
   };
