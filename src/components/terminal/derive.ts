@@ -24,10 +24,12 @@ export interface CitationCategoryGroup {
   missing: number;
 }
 
-/** Every domain we know to be a rival of the audited brand — tracked
- *  competitors, the classifier's competitor_brands (real domains), and
- *  citation-judged competitor domains. Lets cited rival sites bucket into
- *  "Competitors" instead of the generic "Vendor" pile. */
+/** Domains of the audited brand's REAL rivals — the tracked competitors plus
+ *  the intent+feature classified competitor_brands (real domains). Deliberately
+ *  EXCLUDES discovered_competitors: that's a loose per-citation "competitor"
+ *  label (100s of domains) that would flood the Competitors bucket with every
+ *  vendor/listicle the LLM happened to tag. Lets cited rival sites bucket into
+ *  "Competitors" instead of the generic "Vendor" pile — accurately. */
 export function competitorDomainSet(audit: Audit): Set<string> {
   const s = new Set<string>();
   for (const c of audit.competitors ?? []) {
@@ -37,12 +39,6 @@ export function competitorDomainSet(audit: Audit): Set<string> {
   for (const c of audit.insights?.competitor_brands ?? []) {
     const d = normalizeDomain(c.domain || competitorToDomain(c.name));
     if (d) s.add(d);
-  }
-  for (const d of audit.discovered_competitors ?? []) {
-    if (d.label === "competitor") {
-      const nd = normalizeDomain(d.domain);
-      if (nd) s.add(nd);
-    }
   }
   return s;
 }

@@ -124,9 +124,11 @@ export type CitationCategory =
   | 'linkedin'
   | 'community';
 
-/** Roundup / "best-X-software" listicle URL pattern (host-agnostic). */
+/** Roundup / "best-X-software" listicle URL pattern (host-agnostic): a
+ *  "best/top … software/tools" phrase, an alternatives/vs/comparison keyword, or
+ *  a "/best" | "/top" path segment ("logicatalog.com/tms/best/"). */
 const LISTICLE_URL =
-  /\b(best|top)\b[-\w/]*\b(software|tools?|platforms?|solutions?|systems?|apps?|vendors?|companies|services|providers?)\b|\b(alternatives?|vs|versus|comparison)\b/i;
+  /\b(best|top)\b[-\w/]*\b(software|tools?|platforms?|solutions?|systems?|apps?|vendors?|companies|services|providers?)\b|\b(alternatives?|vs|versus|comparison)\b|\/(best|top)s?\b/i;
 
 /** Product-review URL pattern (a review section on any host). */
 const REVIEW_URL = /\/reviews?\//i;
