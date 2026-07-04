@@ -258,10 +258,8 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     }
     return terms;
   }, [audit, polls]);
-  const isNicheRelevant = (e: CitationAnalysisEntry): boolean => {
-    // Prefer the LLM's semantic verdict (handles "trade finance" vs "global
-    // trade"); fall back to the keyword heuristic for pre-classifier audits.
-    if (typeof e.niche_relevant === "boolean") return e.niche_relevant;
+  // Keyword-only fallback for pre-classifier audits (listicles only).
+  const isNicheRelevantKeyword = (e: CitationAnalysisEntry): boolean => {
     if (nicheTerms.size < 3) return true;
     const hay = `${titleByUrl.get(e.url) ?? ""} ${e.resolved_url || e.url}`.toLowerCase();
     for (const t of nicheTerms) if (hay.includes(t)) return true;
@@ -335,8 +333,15 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   const actionableRaw = groups.filter((g) => ACTIONABLE.has(g.key));
   // Keep DEEP pages only; for listicles, also require niche relevance (drop the
   // vague off-topic roundups). Recount after filtering.
+  // In-niche? Server LLM verdict wins (any content surface). Reviews/directories
+  // are inherently in-niche. Keyword fallback only for listicles on old audits.
+  const nicheOk = (g: (typeof groups)[number], e: CitationAnalysisEntry): boolean => {
+    if (g.key === "reviews") return true;
+    if (typeof e.niche_relevant === "boolean") return e.niche_relevant;
+    return g.key === "listicles" ? isNicheRelevantKeyword(e) : true;
+  };
   const keepActionable = (g: (typeof groups)[number], e: CitationAnalysisEntry) =>
-    !isHomepage(e) && (g.key !== "listicles" || isNicheRelevant(e));
+    !isHomepage(e) && nicheOk(g, e);
   const actionableGroups = actionableRaw
     .map((g) => {
       const entries = g.entries.filter((e) => keepActionable(g, e));
@@ -352,9 +357,10 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     (n, g) => n + g.entries.filter(isHomepage).length,
     0
   );
-  const offNicheHidden = actionableRaw
-    .filter((g) => g.key === "listicles")
-    .reduce((n, g) => n + g.entries.filter((e) => !isHomepage(e) && !isNicheRelevant(e)).length, 0);
+  const offNicheHidden = actionableRaw.reduce(
+    (n, g) => n + g.entries.filter((e) => !isHomepage(e) && !nicheOk(g, e)).length,
+    0
+  );
   const landscapeGroups = groups.filter((g) => !ACTIONABLE.has(g.key));
   const actionableMissing = actionableGroups.reduce((n, g) => n + g.missing, 0);
 
@@ -661,7 +667,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
           {homepagesHidden > 0 && ` · ${homepagesHidden} homepage${
             homepagesHidden === 1 ? "" : "s"
           } hidden`}
-          {offNicheHidden > 0 && ` · ${offNicheHidden} off-topic listicle${
+          {offNicheHidden > 0 && ` · ${offNicheHidden} off-niche source${
             offNicheHidden === 1 ? "" : "s"
           } hidden`}
         </span>

@@ -431,29 +431,34 @@ export async function classifyCompetitors(
 }
 
 const NICHE_SYSTEM =
-  'You decide which cited ARTICLES are roundups/lists/directories genuinely IN ' +
-  "the audited brand's category — places where getting THIS brand listed would " +
-  'improve its visibility in AI answers. You are given the brand (name, category, ' +
-  'positioning) and a numbered list of article titles (+url). Return the indices ' +
-  'that are truly in the brand\'s niche. DROP articles that merely share a WORD but ' +
-  'are a different domain — e.g. for a supply-chain / logistics / global-trade ' +
-  'software brand, DROP stock/forex "trading" guides, "trade finance"/accounting ' +
-  'docs, HR/recruiting lists, generic AI-framework or developer tutorials, and ' +
-  'roundups for unrelated industries. Judge by MEANING, not keyword overlap. When ' +
-  'unsure, EXCLUDE. Return ONLY JSON {"relevant":[indices]}.';
+  'You decide which cited ARTICLES/LISTS are genuinely in the audited brand\'s ' +
+  'category — "best/top X" roundups, directories, comparison or "vs" posts, or ' +
+  'videos where THIS brand would naturally be listed alongside its competitors. ' +
+  'You are given the brand (name, category, positioning), the brands it COMPETES ' +
+  'WITH, and a numbered list of items (title + url). A list is in-niche ONLY if ' +
+  'the brand AND brands like its named competitors would plausibly appear in it. ' +
+  'Judge by MEANING, not shared words. Be STRICT — EXCLUDE adjacent-but-different ' +
+  'categories that merely share a keyword: e.g. trade FINANCE / customs paperwork ' +
+  'vs global TRADE software, stock/forex TRADING vs trade compliance, local fleet ' +
+  'ROUTE-optimization / last-mile vs freight visibility, HR, generic AI/developer ' +
+  'tutorials, and unrelated industries. When unsure, EXCLUDE. Return ONLY JSON ' +
+  '{"relevant":[indices]}.';
 
 /**
- * Judge which cited articles (roundups/listicles) are genuinely in the brand's
- * niche — semantic, so it separates "global trade software" from "trade finance"
- * or stock "trading". Batched (≤50/call). Returns a boolean per input item
- * (true = in-niche / keep). On no key / failure returns all-true so nothing is
- * wrongly hidden.
+ * Judge which cited articles/lists are genuinely in the brand's niche —
+ * semantic, anchored on the brand's real competitors, so it separates "global
+ * trade software" from "trade finance", stock "trading", or fleet "route
+ * optimization". Batched (≤50/call). Returns a boolean per input item (true =
+ * in-niche / keep). On no key / failure returns all-true so nothing is wrongly
+ * hidden.
  */
 export async function classifyNicheRelevance(
   input: {
     brandName: string;
     category: string;
     positioning: string;
+    competitors?: string[];
+    products?: string[];
     items: Array<{ title: string; url: string }>;
   },
   env: Env
@@ -467,7 +472,9 @@ export async function classifyNicheRelevance(
     const user = JSON.stringify({
       brand: input.brandName,
       category: input.category || '(unknown)',
-      positioning: input.positioning.slice(0, 300),
+      positioning: input.positioning.slice(0, 240),
+      competes_with: (input.competitors ?? []).slice(0, 12),
+      products: (input.products ?? []).slice(0, 6),
       articles: batch.map((it, i) => ({ i, title: it.title.slice(0, 140), url: it.url.slice(0, 160) })),
     });
     try {

@@ -442,26 +442,38 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   for (const p of polls)
     for (const c of p.citations ?? [])
       if (c.url && c.title && !titleByUrl.has(c.url)) titleByUrl.set(c.url, c.title);
-  const listicleEntries = analysis.filter(
-    (e) =>
-      citationCategory(e.resolved_url || e.url, e.domain, e.source_type, competitorDomains) ===
-      'listicles'
+  // Judge every get-listable CONTENT surface (roundups, editorial, videos, social,
+  // community) — not vendor/competitor/review-directory pages, which are inherently
+  // in-niche or handled elsewhere. Anchored on the brand's real competitors.
+  const JUDGE_CATS = new Set(['listicles', 'editorial', 'youtube', 'community', 'reddit', 'linkedin', 'pr']);
+  const contentEntries = analysis.filter((e) =>
+    JUDGE_CATS.has(citationCategory(e.resolved_url || e.url, e.domain, e.source_type, competitorDomains))
   );
-  if (listicleEntries.length > 0) {
+  if (contentEntries.length > 0) {
+    const dna = audit.insights as { competitor_brands?: Array<{ name: string }> } | null;
+    const competitorNames = Array.from(
+      new Set([
+        ...((audit.competitors as string[] | null) ?? []),
+        ...((dna?.competitor_brands ?? []).map((c) => c.name)),
+      ])
+    );
+    const brandDna = (audit as { brand_dna?: { products?: string[] } }).brand_dna;
     try {
       const verdicts = await classifyNicheRelevance(
         {
           brandName: you,
           category: (audit.category as string | null) || '',
           positioning: (audit.positioning as string | null) || '',
-          items: listicleEntries.map((e) => ({
+          competitors: competitorNames,
+          products: brandDna?.products ?? [],
+          items: contentEntries.map((e) => ({
             title: titleByUrl.get(e.url) || '',
             url: e.resolved_url || e.url,
           })),
         },
         env
       );
-      listicleEntries.forEach((e, i) => {
+      contentEntries.forEach((e, i) => {
         e.niche_relevant = verdicts[i];
       });
     } catch (err: any) {
