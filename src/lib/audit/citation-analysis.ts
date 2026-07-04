@@ -266,6 +266,31 @@ async function resolveUrlStatus(url: string): Promise<{ status: number; finalUrl
   }
 }
 
+/**
+ * Resolve a Gemini vertexaisearch proxy URL to its real destination CHEAPLY —
+ * a manual-redirect GET that reads the Location header without downloading the
+ * page body. Returns the real URL or null. Much lighter than a full page fetch,
+ * so we can resolve many without blowing the subrequest/CPU budget.
+ */
+async function resolveRedirect(url: string): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4000);
+  try {
+    const res = await fetch(url, {
+      method: 'GET',
+      redirect: 'manual',
+      signal: controller.signal,
+      headers: { 'user-agent': STATUS_UA },
+    });
+    const loc = res.headers.get('location');
+    return loc && /^https?:\/\//i.test(loc) ? loc : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── main ─────────────────────────────────────────────────────────────────
 
 /**
@@ -383,6 +408,29 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     console.error('[citations] status probe failed (non-fatal):', e?.message);
   }
 
+  // Gemini wraps EVERY source in a vertexaisearch proxy; only the few we
+  // page-fetched have their real deep URL, so most collapse to a domain-root
+  // (homepage) and the Gemini-only view looks empty. Resolve the rest CHEAPLY
+  // (manual-redirect Location read, no body) — bounded + non-fatal — so they
+  // categorize as real content.
+  const GEMINI_RESOLVE_CAP = 140;
+  const geminiFinal = new Map<string, string>();
+  for (const u of allUrls) {
+    const pf = pages.get(u)?.signals.final_url;
+    if (u.includes('vertexaisearch.cloud.google.com') && pf) geminiFinal.set(u, pf);
+  }
+  const geminiToResolve = allUrls
+    .filter((u) => u.includes('vertexaisearch.cloud.google.com') && !geminiFinal.has(u))
+    .slice(0, GEMINI_RESOLVE_CAP);
+  try {
+    const resolved = await mapWithConcurrency(geminiToResolve, 12, (u) => resolveRedirect(u));
+    geminiToResolve.forEach((u, i) => {
+      if (resolved[i]) geminiFinal.set(u, resolved[i]!);
+    });
+  } catch (e: any) {
+    console.error('[citations] gemini resolve failed (non-fatal):', e?.message);
+  }
+
   const analysis: CitationAnalysisEntry[] = allUrls.map((url) => {
     const meta = urlMeta.get(url)!;
     const page = pages.get(url);
@@ -404,10 +452,9 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     // fetch's final URL.
     const pageFinal = page?.signals.final_url;
     const isGeminiProxy = url.includes('vertexaisearch.cloud.google.com');
+    const geminiReal = isGeminiProxy ? geminiFinal.get(url) : undefined;
     const resolved_url = isGeminiProxy
-      ? pageFinal && pageFinal !== url
-        ? pageFinal
-        : `https://${meta.domain}/`
+      ? geminiReal || (pageFinal && pageFinal !== url ? pageFinal : `https://${meta.domain}/`)
       : probe && probe.finalUrl && probe.finalUrl !== url
         ? probe.finalUrl
         : pageFinal && pageFinal !== url
