@@ -156,9 +156,13 @@ function Row({
             {link}
           </a>
           <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 3 }}>
-            cited by <b style={{ color: "var(--ink-2)" }}>{citingCount}/{llmCount}</b>{" "}
-            LLM{llmCount === 1 ? "" : "s"} · across {e.query_count} quer
-            {e.query_count === 1 ? "y" : "ies"}
+            cited by{" "}
+            <b style={{ color: "var(--ink-2)" }}>
+              {(e.llms_citing ?? []).length
+                ? (e.llms_citing ?? []).map((l) => LLM_LABEL[l]).join(", ")
+                : "ChatGPT"}
+            </b>{" "}
+            · across {e.query_count} quer{e.query_count === 1 ? "y" : "ies"}
             {!e.brand_present && ` · ${hint(e.source_type)}`}
           </div>
           {query && (
