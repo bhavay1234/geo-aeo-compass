@@ -275,7 +275,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
 
   const { data: audit } = await supabase
     .from('audits')
-    .select('id, brand_name, domain')
+    .select('id, brand_name, domain, competitors, insights')
     .eq('id', auditId)
     .single();
   if (!audit) return;
@@ -283,6 +283,23 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   const ownLower = you.trim().toLowerCase();
   const brandDomain: string = audit.domain;
   const ownNorm = normalizeDomain(brandDomain);
+
+  // Real rival domains (tracked + intent-classified) — used to PRIORITIZE their
+  // cited pages into the fetch set so every competitor page resolves its deep
+  // URL (not just the top-150 by leverage).
+  const competitorDomains = new Set<string>();
+  for (const c of (audit.competitors as string[] | null) ?? []) {
+    const d = normalizeDomain(competitorToDomain(c));
+    if (d) competitorDomains.add(d);
+  }
+  const cbrands = (audit.insights as { competitor_brands?: Array<{ domain?: string; name: string }> } | null)
+    ?.competitor_brands;
+  for (const c of cbrands ?? []) {
+    const d = normalizeDomain(c.domain || competitorToDomain(c.name));
+    if (d) competitorDomains.add(d);
+  }
+  const isCompetitorDomain = (d: string): boolean =>
+    competitorDomains.has(d) || [...competitorDomains].some((cd) => d.endsWith('.' + cd));
 
   // Terminal-state guard: mark 'analyzing' up front and ALWAYS finish at 'done'
   // in finally — a thrown Apify / verdict / DB error can never leave the stage
@@ -341,7 +358,11 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     if (mb.llms.size !== ma.llms.size) return mb.llms.size - ma.llms.size;
     return mb.queries.size - ma.queries.size;
   });
-  const fetchUrls = rankedUrls.slice(0, PAGE_FETCH_CAP);
+  // Competitor-domain pages ALWAYS get fetched (so their deep URL resolves),
+  // then fill the rest of the cap with the highest-leverage remaining sources.
+  const compUrls = rankedUrls.filter((u) => isCompetitorDomain(urlMeta.get(u)!.domain));
+  const nonCompUrls = rankedUrls.filter((u) => !isCompetitorDomain(urlMeta.get(u)!.domain));
+  const fetchUrls = [...compUrls, ...nonCompUrls].slice(0, Math.max(PAGE_FETCH_CAP, compUrls.length));
   const pages = await resolveSignals(supabase, fetchUrls, env);
 
   // Status probe — ONLY the dead candidates among the fetched set (content fetch
