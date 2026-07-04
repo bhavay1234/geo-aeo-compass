@@ -65,12 +65,15 @@ export async function pollChatGPTviaDFS(
     [
       {
         user_prompt: query,
-        model_name: 'gpt-5.3-chat-latest',
+        // gpt-4o ACTUALLY grounds via DFS — a live probe returned 15 real
+        // `annotations` (third-party comparison/editorial pages) for a product
+        // query, vs ZERO for gpt-5.3-chat-latest and gpt-4o-search-preview
+        // (which answered from training, forcing the prose-homepage fallback).
+        // The model choice is the difference between real cited sources and a
+        // list of recommended products linked to their own homepages.
+        model_name: 'gpt-4o',
         web_search: true,
-        // Live-verified: without this nudge gpt-5.3 often answers product
-        // queries from training with ZERO sources; with it, it searches and
-        // returns annotations + inline links (matching chatgpt.com behavior
-        // for shopping-style queries).
+        // Nudge the model to search + cite even for shopping-style prompts.
         system_message:
           'When the question involves products, brands, comparisons, or ' +
           'recommendations, use web search to ground your answer and cite ' +
@@ -79,80 +82,7 @@ export async function pollChatGPTviaDFS(
     ],
     env
   );
-  return normalize(data, 'chatgpt', 'gpt-5.3-chat-latest (dataforseo)');
-}
-
-/**
- * TEMPORARY DIAGNOSTIC — probe which DFS ChatGPT models actually ground (return
- * structured `annotations`) vs answer from training (empty annotations → we mine
- * prose homepage links). Remove once the grounding model is locked in.
- */
-export async function probeChatGPTModels(
-  query: string,
-  models: string[],
-  env: Env
-): Promise<
-  Array<{ model: string; annotations: number; markdown: number; sample: string[] }>
-> {
-  const out: Array<{
-    model: string;
-    annotations: number;
-    markdown: number;
-    sample: string[];
-  }> = [];
-  for (const model of models) {
-    try {
-      const data = (await callDFS(
-        '/ai_optimization/chat_gpt/llm_responses/live',
-        [
-          {
-            user_prompt: query,
-            model_name: model,
-            web_search: true,
-            system_message:
-              'When the question involves products, brands, comparisons, or ' +
-              'recommendations, use web search to ground your answer and cite ' +
-              'your sources with links.',
-          },
-        ],
-        env
-      )) as AnyObj;
-      const tasks = (data?.tasks as AnyObj[] | undefined) ?? [];
-      const r0 = ((tasks[0]?.result as AnyObj[] | undefined) ?? [])[0] ?? {};
-      const items = (r0.items as AnyObj[] | undefined) ?? [r0];
-      const extracted = extractFromItems(items);
-      const md = refsFromMarkdown(extracted.text);
-      out.push({
-        model,
-        annotations: extracted.refs.length,
-        markdown: md.length,
-        sample: extracted.refs
-          .slice(0, 5)
-          .map((r) => String((r as AnyObj).url ?? '')),
-      });
-    } catch (err: any) {
-      out.push({ model, annotations: -1, markdown: -1, sample: [String(err?.message)] });
-    }
-  }
-  return out;
-}
-
-/** TEMPORARY DIAGNOSTIC — list DFS ChatGPT models + web_search support flag. */
-export async function listChatGPTModels(
-  env: Env
-): Promise<Array<{ model: string; web_search: boolean }>> {
-  const data = (await callDFS(
-    '/ai_optimization/chat_gpt/llm_responses/models',
-    [],
-    env
-  )) as AnyObj;
-  const tasks = (data?.tasks as AnyObj[] | undefined) ?? [];
-  const result = (tasks[0]?.result as AnyObj[] | undefined) ?? [];
-  const items = (result[0]?.items as AnyObj[] | undefined) ?? result;
-  return items.map((i) => ({
-    model: String((i as AnyObj).model_name ?? (i as AnyObj).model ?? ''),
-    web_search: Boolean((i as AnyObj).web_search_supported),
-  }));
+  return normalize(data, 'chatgpt', 'gpt-4o (dataforseo)');
 }
 
 export async function pollPerplexity(
