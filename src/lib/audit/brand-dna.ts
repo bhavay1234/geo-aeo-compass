@@ -93,6 +93,14 @@ const TRANSACTIONAL_INTENTS = new Set(['transactional', 'commercial']);
 const JUNK_WORDS =
   /\b(internship|intern|jobs?|careers?|salary|salaries|hiring|login|log in|sign ?in|sign ?up|support|help ?desk|tutorial|course|certification|resume|cv|acquires?|acquisition|merger|edition|textbook|book|pdf|syllabus|meaning|definition|gmbh|co kg|pvt ltd|wikipedia)\b/i;
 
+// Local-business lookups: "... pembroke pines fl", "... new castle pa" — a
+// trailing US state code marks a geo/local query, never a category buyer query.
+const GEO_TAIL =
+  /\s(al|ak|az|ar|ca|co|ct|de|fl|ga|hi|ia|id|il|ks|ky|la|ma|md|mi|mn|mo|ms|mt|nc|nd|ne|nh|nj|nm|nv|ny|oh|ok|pa|ri|sc|sd|tn|tx|ut|va|vt|wa|wi|wv|wy)\s*$/i;
+// Contextual / research noise that isn't a product-buying query.
+const CONTEXT_NOISE =
+  /\b(near me|within the|case study|use cases|for dummies|reddit|quora|ppt|slideshare)\b/i;
+
 /**
  * Merge per-seed suggestions into the 20 most relevant queries:
  * dedupe permutations, drop navigational + own-brand-only keywords, apply the
@@ -110,7 +118,7 @@ export function pickQueries(
   for (const s of suggestions) {
     const kw = s.keyword.toLowerCase();
     if (s.intent === 'navigational') continue;
-    if (JUNK_WORDS.test(kw)) continue;
+    if (JUNK_WORDS.test(kw) || GEO_TAIL.test(kw) || CONTEXT_NOISE.test(kw)) continue;
     if (intentMode === 'transactional' && !TRANSACTIONAL_INTENTS.has(s.intent)) continue;
     // Own-brand keywords: keep comparisons ("brand vs x"), drop pure brand navs.
     if (brand && kw.includes(brand) && !/\bvs\b|\balternative/i.test(kw)) continue;
