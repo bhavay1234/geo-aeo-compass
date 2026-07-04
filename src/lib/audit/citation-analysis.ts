@@ -372,15 +372,22 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
       : page
         ? page.signals.http_status
         : undefined;
-    // Gemini's vertexaisearch proxy → clean domain-root (the real domain rides in
-    // meta.domain). No redirect-follow subrequest. Other probed URLs keep their
-    // resolved final URL when it differs.
+    // Real destination URL. For Gemini's vertexaisearch proxy: the DEEP page URL
+    // captured from the content fetch (res.url) when we fetched it — so a cited
+    // competitor article shows its real path, not the bare homepage — else a
+    // clean domain-root fallback. Non-Gemini: the probe's resolved URL, then the
+    // fetch's final URL.
+    const pageFinal = page?.signals.final_url;
     const isGeminiProxy = url.includes('vertexaisearch.cloud.google.com');
     const resolved_url = isGeminiProxy
-      ? `https://${meta.domain}/`
+      ? pageFinal && pageFinal !== url
+        ? pageFinal
+        : `https://${meta.domain}/`
       : probe && probe.finalUrl && probe.finalUrl !== url
         ? probe.finalUrl
-        : undefined;
+        : pageFinal && pageFinal !== url
+          ? pageFinal
+          : undefined;
     return {
       url,
       domain: meta.domain,

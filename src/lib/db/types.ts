@@ -139,6 +139,10 @@ export interface PageSignals {
   has_canonical: boolean;
   page_type: PageType;
   analyzed_via: "fetch" | "apify";
+  /** Final URL after redirects (captured from the fetch) — the REAL destination
+   *  for Gemini vertexaisearch grounding proxies, with the deep path intact.
+   *  In-memory only (not cached); absent on cache hits and the apify path. */
+  final_url?: string;
 }
 
 /** Per-cited-source rollup for the Citations tab (audits.citation_analysis). */

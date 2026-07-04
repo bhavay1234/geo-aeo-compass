@@ -33,7 +33,9 @@ export async function fetchPageSignals(url: string): Promise<ExtractedPage | nul
     if (!ct.includes('html') && ct !== '') return null;
     const html = (await res.text()).slice(0, MAX_HTML_BYTES);
     if (!html.trim()) return null;
-    return extractSignals(url, html, res.status, 'fetch');
+    // res.url is the final URL after redirects — the real page behind Gemini's
+    // vertexaisearch proxy (with its deep path), captured for free here.
+    return extractSignals(url, html, res.status, 'fetch', res.url);
   } catch {
     return null;
   } finally {
@@ -46,7 +48,8 @@ export function extractSignals(
   url: string,
   html: string,
   status: number,
-  via: 'fetch' | 'apify'
+  via: 'fetch' | 'apify',
+  finalUrl?: string
 ): ExtractedPage {
   const title = stripTags(firstMatch(html, /<title[^>]*>([\s\S]*?)<\/title>/i)).trim();
   const h1 = stripTags(firstMatch(html, /<h1[^>]*>([\s\S]*?)<\/h1>/i)).trim();
@@ -71,6 +74,7 @@ export function extractSignals(
       has_canonical,
       page_type: classifyPageType(url, title, schema_types, word_count),
       analyzed_via: via,
+      final_url: finalUrl && finalUrl !== url ? finalUrl : undefined,
     },
     text_sample,
   };
