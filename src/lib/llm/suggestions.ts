@@ -431,27 +431,27 @@ export async function classifyCompetitors(
 }
 
 const NICHE_SYSTEM =
-  'You are a ruthless AEO strategist deciding where a brand should GET LISTED so it ' +
-  'appears in AI answers. For each cited item (title + url) return ' +
-  '{i, relevant, reason}.\n' +
-  'relevant=TRUE ONLY if the item is a "best/top X" roundup, a software directory/' +
-  'category page, or a product comparison that ranks PRODUCTS OF THE SAME TYPE as ' +
-  'the brand — such that the brand AND the named competitors would realistically ' +
-  'appear in it. The competitor list is your ANCHOR: if brands like those would NOT ' +
-  'be in it, relevant=false.\n' +
-  'relevant=FALSE for: news / opinion / analysis / feature articles (not a place ' +
-  'you can be listed); reviews of a DIFFERENT product or a different sub-category ' +
-  '(e.g. fleet dashcams / telematics for a freight-visibility brand); B2B trading ' +
-  'marketplaces or buyer directories built for a different purpose (e.g. Alibaba / ' +
-  'IndiaMART-style import-export marketplaces vs logistics software); how-to / ' +
-  'educational / glossary posts; vendor blogs about a neighboring category; and ' +
-  'anything only loosely related by a shared word (trade FINANCE, stock TRADING, ' +
-  'HR, dev tutorials). When unsure, relevant=FALSE.\n' +
-  'reason (ONLY when relevant; ONE sentence; SPECIFIC — never generic filler like ' +
-  '"relevant to the brand\'s audience/offerings"): name WHAT the list ranks, WHICH ' +
-  'named competitor is (or would be) in it, and the concrete visibility gain. If ' +
-  'you cannot name a specific, competitor-anchored reason, set relevant=false and ' +
-  'reason "". Vary wording across items. Return ONLY JSON: ' +
+  'You are an AEO strategist. For each cited item (title + url) decide if it is ' +
+  "ON THE BRAND'S NICHE — content where the brand being listed, mentioned, or " +
+  'featured would help it show up in AI answers. Return {i, relevant, reason}.\n' +
+  'Judge by TOPIC, NOT format. relevant=TRUE if the item is genuinely about the ' +
+  "brand's category — whether it's a \"best/top X\" roundup, a software directory/" +
+  'comparison, OR an on-topic discussion, forum thread, Q&A, post, or video in that ' +
+  'category — such that the brand and brands like its named competitors are ' +
+  'relevant to it. An on-topic Reddit/LinkedIn/YouTube/Quora item COUNTS (the play ' +
+  'is to get mentioned/featured, not "listed"). Use the competitor list as your ' +
+  'anchor for whether the TOPIC matches.\n' +
+  'relevant=FALSE when the TOPIC is a DIFFERENT category that merely shares a word: ' +
+  'stock/forex TRADING vs trade software; trade FINANCE / customs paperwork; fleet ' +
+  'dashcams / telematics; HR; generic AI/developer tutorials; B2B trading ' +
+  'marketplaces built for a different purpose (Alibaba / IndiaMART-style); pure ' +
+  'news with no participation angle; unrelated industries. When the topic is off ' +
+  "the brand's niche, FALSE.\n" +
+  'reason (ONLY when relevant; ONE specific sentence — name the TOPIC, a named ' +
+  'competitor that is/would be there, and the concrete gain; FIT THE FORMAT: "get ' +
+  'listed" for a roundup/directory, "get mentioned in this thread" for a forum/' +
+  'post, "get featured" for a video). No generic filler; if no specific reason, ' +
+  'relevant=false, reason "". Vary wording. Return ONLY JSON: ' +
   '{"items":[{"i":number,"relevant":boolean,"reason":string}]}.';
 
 export interface GetListedVerdict {
