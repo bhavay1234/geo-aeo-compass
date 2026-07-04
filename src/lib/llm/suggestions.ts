@@ -431,27 +431,28 @@ export async function classifyCompetitors(
 }
 
 const NICHE_SYSTEM =
-  'You are an AEO strategist. For each cited item (title + url) decide if it is ' +
-  "ON THE BRAND'S NICHE — content where the brand being listed, mentioned, or " +
-  'featured would help it show up in AI answers. Return {i, relevant, reason}.\n' +
-  'Judge by TOPIC, NOT format. relevant=TRUE if the item is genuinely about the ' +
-  "brand's category — whether it's a \"best/top X\" roundup, a software directory/" +
-  'comparison, OR an on-topic discussion, forum thread, Q&A, post, or video in that ' +
-  'category — such that the brand and brands like its named competitors are ' +
-  'relevant to it. An on-topic Reddit/LinkedIn/YouTube/Quora item COUNTS (the play ' +
-  'is to get mentioned/featured, not "listed"). Use the competitor list as your ' +
-  'anchor for whether the TOPIC matches.\n' +
-  'relevant=FALSE when the TOPIC is a DIFFERENT category that merely shares a word: ' +
-  'stock/forex TRADING vs trade software; trade FINANCE / customs paperwork; fleet ' +
-  'dashcams / telematics; HR; generic AI/developer tutorials; B2B trading ' +
-  'marketplaces built for a different purpose (Alibaba / IndiaMART-style); pure ' +
-  'news with no participation angle; unrelated industries. When the topic is off ' +
-  "the brand's niche, FALSE.\n" +
-  'reason (ONLY when relevant; ONE specific sentence — name the TOPIC, a named ' +
-  'competitor that is/would be there, and the concrete gain; FIT THE FORMAT: "get ' +
+  'You are an AEO strategist. For each cited item (title + url) decide if its TOPIC ' +
+  "is in the brand's space — content where the brand being listed, mentioned, or " +
+  'featured would help it appear in AI answers. Return {i, relevant, reason}.\n' +
+  'Judge by TOPIC, not format, and be INCLUSIVE about on-topic content. relevant=' +
+  'TRUE for a "best/top X" roundup, a software directory/comparison, OR an on-topic ' +
+  'forum thread, Q&A, LinkedIn post, or YouTube video whose subject is the brand\'s ' +
+  'category. KEEP examples (for a freight/logistics/supply-chain/trade-software ' +
+  'brand): "best logistics/shipping/freight/supply-chain software", "AI in supply ' +
+  'chain", trade/customs COMPLIANCE discussions, a video reviewing shipping ' +
+  'software, a Reddit thread asking which freight/logistics tool to use. The ' +
+  'competitor list is your anchor for whether the topic matches. If the topic ' +
+  "plausibly overlaps the brand's space, relevant=TRUE.\n" +
+  'relevant=FALSE ONLY when the topic is a CLEARLY DIFFERENT category that merely ' +
+  'shares a word: stock/forex TRADING or investing; trade FINANCE (financing/' +
+  'payments); fleet dashcams / vehicle telematics; local last-mile ROUTE ' +
+  'optimization; HR / recruiting; generic AI or developer tutorials; B2B trading ' +
+  'marketplaces built to find suppliers (Alibaba / IndiaMART-style); pure news with ' +
+  'no participation angle; unrelated industries.\n' +
+  'reason (ONLY when relevant; ONE specific sentence fitting the FORMAT: "get ' +
   'listed" for a roundup/directory, "get mentioned in this thread" for a forum/' +
-  'post, "get featured" for a video). No generic filler; if no specific reason, ' +
-  'relevant=false, reason "". Vary wording. Return ONLY JSON: ' +
+  'post/Q&A, "get featured" for a video — name the topic + a named competitor that ' +
+  'is/would be there). No generic filler. Return ONLY JSON: ' +
   '{"items":[{"i":number,"relevant":boolean,"reason":string}]}.';
 
 export interface GetListedVerdict {
@@ -496,7 +497,7 @@ export async function judgeGetListedSources(
       const completion = await withTimeout(
         openai.chat.completions.create({
           model: MODEL, // gpt-4o-mini — OpenAI's low-cost tier
-          temperature: 0.2,
+          temperature: 0.1,
           max_tokens: 900,
           messages: [
             { role: 'system', content: NICHE_SYSTEM },
