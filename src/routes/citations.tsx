@@ -401,10 +401,27 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
 
   // The worklist: get-listable DEEP pages you're missing, ranked by cross-LLM
   // leverage (cited by more LLMs / more queries = higher payoff to land).
+  // Universal blind spots — cited by ALL polled LLMs but missing you. Highest ROI
+  // (every engine agrees this source matters). Get-listable surfaces only. These
+  // are FEATURED separately, so we exclude them from the main worklist below to
+  // avoid showing the same page twice.
+  const universalTargets = actionableGroups
+    .flatMap((g) => g.entries.map((e) => ({ e, label: g.label })))
+    .filter(
+      ({ e }) => !e.brand_present && (e.llms_citing?.length ?? 0) >= polledLlms.length && polledLlms.length > 1
+    )
+    .sort((a, b) => b.e.query_count - a.e.query_count)
+    .slice(0, 6);
+  const universalUrls = new Set(
+    universalTargets.map(({ e }) => e.resolved_url || e.url)
+  );
+
   const topTargets = actionableGroups
     .flatMap((g) =>
       g.entries.filter((e) => !e.brand_present).map((e) => ({ e, key: g.key, label: g.label }))
     )
+    // Drop the universal blind spots — they lead their own section above.
+    .filter(({ e }) => !universalUrls.has(e.resolved_url || e.url))
     .sort(
       (a, b) =>
         (b.e.llms_citing?.length ?? 0) - (a.e.llms_citing?.length ?? 0) ||
@@ -428,16 +445,6 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   const ownGrade = ownScore >= 60 ? "Strong" : ownScore >= 25 ? "Moderate" : "Weak";
   const ownGradeColor =
     ownScore >= 60 ? "var(--pos)" : ownScore >= 25 ? "var(--warn)" : "var(--hot)";
-
-  // Universal blind spots — cited by ALL polled LLMs but missing you. Highest ROI
-  // (every engine agrees this source matters). Get-listable surfaces only.
-  const universalTargets = actionableGroups
-    .flatMap((g) => g.entries.map((e) => ({ e, label: g.label })))
-    .filter(
-      ({ e }) => !e.brand_present && (e.llms_citing?.length ?? 0) >= polledLlms.length && polledLlms.length > 1
-    )
-    .sort((a, b) => b.e.query_count - a.e.query_count)
-    .slice(0, 6);
 
   // Landscape rolled up by DOMAIN — hundreds of vendor/competitor homepage rows
   // are noise; the useful view is "which rival/vendor domains do the LLMs cite,
