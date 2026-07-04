@@ -431,36 +431,41 @@ export async function classifyCompetitors(
 }
 
 const NICHE_SYSTEM =
-  'You are an AEO strategist. For each cited item (title + url) decide if its TOPIC ' +
-  "is in the brand's space — content where the brand being listed, mentioned, or " +
-  'featured would help it appear in AI answers. Return {i, relevant, reason}.\n' +
-  'Judge by TOPIC, not format, and be INCLUSIVE about on-topic content. relevant=' +
-  'TRUE for a "best/top X" roundup, a software directory/comparison, OR an on-topic ' +
-  'forum thread, Q&A, LinkedIn post, or YouTube video whose subject is the brand\'s ' +
-  'category. KEEP examples (for a freight/logistics/supply-chain/trade-software ' +
-  'brand): "best logistics/shipping/freight/supply-chain software", "AI in supply ' +
-  'chain", trade/customs COMPLIANCE discussions, a video reviewing shipping ' +
-  'software, a Reddit thread asking which freight/logistics tool to use. The ' +
-  'competitor list is your anchor for whether the topic matches. If the topic ' +
-  "plausibly overlaps the brand's space, relevant=TRUE.\n" +
-  'relevant=FALSE when: (a) the item is a review/profile page for ONE specific ' +
-  'product (e.g. g2.com/products/<competitor>/reviews, a Capterra product profile, ' +
-  'a "review of <product>") — you CANNOT list yourself on a rival\'s own product ' +
-  'page; only CATEGORY/directory pages that rank MANY products (g2.com/categories/' +
-  'X, "best X software") count. (b) the topic is a CLEARLY DIFFERENT category that ' +
-  'merely shares a word: stock/forex TRADING or investing; trade FINANCE ' +
-  '(financing/payments); fleet dashcams / vehicle telematics; local last-mile ' +
-  'ROUTE optimization; HR / recruiting; generic AI or developer tutorials; B2B ' +
-  'trading marketplaces built to find suppliers (Alibaba / IndiaMART-style); pure ' +
-  'news with no participation angle; unrelated industries.\n' +
-  'reason (ONLY when relevant; ONE specific sentence fitting the FORMAT: "get ' +
-  'listed" for a roundup/directory, "get mentioned in this thread" for a forum/' +
-  'post/Q&A, "get featured" for a video — name the topic + a named competitor that ' +
-  'is/would be there). No generic filler. Return ONLY JSON: ' +
-  '{"items":[{"i":number,"relevant":boolean,"reason":string}]}.';
+  'You are an AEO strategist. For each cited item (title + url) return ' +
+  '{i, relevant, listable, reason}.\n' +
+  'relevant = the item TOPIC is in the brand\'s space (content where being ' +
+  'listed/mentioned/featured would help the brand show up in AI answers). Judge by ' +
+  'TOPIC not format; be inclusive for on-topic roundups, directories, comparisons, ' +
+  'forum threads, Q&A, LinkedIn posts, YouTube videos. The competitor list is your ' +
+  'anchor. relevant=FALSE for a CLEARLY DIFFERENT category that merely shares a ' +
+  'word: stock/forex TRADING or investing; trade FINANCE (financing/payments); ' +
+  'fleet dashcams / vehicle telematics; local last-mile ROUTE optimization; HR / ' +
+  'recruiting; generic AI or developer tutorials; B2B sourcing marketplaces ' +
+  '(Alibaba / IndiaMART-style); unrelated industries.\n' +
+  'listable = can the brand REALISTICALLY BE ADDED to THIS page? TRUE only when the ' +
+  'page already covers MULTIPLE (TWO OR MORE) different vendors/products in the ' +
+  'category — a "best/top X" roundup, a multi-product comparison or ranking, a ' +
+  'category directory, or a forum/Q&A/video that weighs SEVERAL tools. ' +
+  'listable=FALSE when the page centers on ONE brand or a single event/opinion: a ' +
+  'single-product review or profile page; a single-company news story (e.g. ' +
+  '"<Company> wins <contract>", a funding/partnership announcement); a press ' +
+  "release about one company; a vendor's own page; or a general thought-leadership/" +
+  'opinion article that ranks NO products (e.g. "AI agents shouldn\'t run your ' +
+  'supply chain"). If it names FEWER THAN TWO category vendors, listable=FALSE. ' +
+  'When in doubt, listable=FALSE — we can only get listed where ≥2 competitors ' +
+  'already are.\n' +
+  'reason (ONLY when relevant AND listable; ONE specific sentence fitting the ' +
+  'FORMAT — "get listed" for a roundup/directory, "get mentioned in this thread" ' +
+  'for a forum/post/Q&A, "get featured" for a video — and it MUST name TWO ' +
+  'competitors/products already present on the page). No generic filler.\n' +
+  'Return ONLY JSON: ' +
+  '{"items":[{"i":number,"relevant":boolean,"listable":boolean,"reason":string}]}.';
 
 export interface GetListedVerdict {
   relevant: boolean;
+  /** Multi-vendor page the brand could actually be added to (≥2 competitors
+   *  already present). Single-brand / single-topic pages are false. */
+  listable: boolean;
   reason: string;
 }
 
@@ -483,7 +488,13 @@ export async function judgeGetListedSources(
   },
   env: Env
 ): Promise<GetListedVerdict[]> {
-  const out: GetListedVerdict[] = input.items.map(() => ({ relevant: true, reason: '' }));
+  // Failure-safe default: keep (relevant + listable) so a judge error never
+  // wrongly empties the worklist. A successfully-parsed batch overrides these.
+  const out: GetListedVerdict[] = input.items.map(() => ({
+    relevant: true,
+    listable: true,
+    reason: '',
+  }));
   if (!env.OPENAI_API_KEY || input.items.length === 0) return out;
   const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
   const BATCH = 25;
@@ -516,12 +527,19 @@ export async function judgeGetListedSources(
       // Default within a successfully-parsed batch: EXCLUDE unless the model
       // returned an entry marking it relevant.
       if (Array.isArray(parsed.items)) {
-        for (let i = 0; i < batch.length; i++) out[start + i] = { relevant: false, reason: '' };
+        for (let i = 0; i < batch.length; i++)
+          out[start + i] = { relevant: false, listable: false, reason: '' };
         for (const it of parsed.items as unknown[]) {
-          const o = it as { i?: unknown; relevant?: unknown; reason?: unknown };
+          const o = it as {
+            i?: unknown;
+            relevant?: unknown;
+            listable?: unknown;
+            reason?: unknown;
+          };
           if (typeof o.i !== 'number' || o.i < 0 || o.i >= batch.length) continue;
           out[start + o.i] = {
             relevant: o.relevant === true,
+            listable: o.listable === true,
             reason: typeof o.reason === 'string' ? o.reason.trim() : '',
           };
         }

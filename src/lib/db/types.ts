@@ -179,6 +179,13 @@ export interface CitationAnalysisEntry {
   /** One-line LLM reason WHY getting this brand listed here would help its AI
    *  visibility. Empty/absent for off-niche or unjudged sources. */
   get_listed_reason?: string;
+  /** Can the brand REALISTICALLY be listed here? True only for multi-vendor
+   *  roundups / comparisons / directories / multi-tool discussions that already
+   *  name ≥2 competitors — where adding the brand is natural. FALSE for pages
+   *  centered on ONE brand (single-product review/profile, single-company news,
+   *  a press release, an opinion piece that ranks no products). Absent = not
+   *  judged (kept, for legacy audits). */
+  get_listable?: boolean;
 }
 
 /** Which of the three influence factors most likely drove a naming. */

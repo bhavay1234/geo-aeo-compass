@@ -354,8 +354,14 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     if (typeof e.niche_relevant === "boolean") return e.niche_relevant;
     return g.key === "listicles" ? isNicheRelevantKeyword(e) : true;
   };
+  // We can only get listed where ≥2 competitors already are. The LLM verdict marks
+  // multi-vendor roundups/comparisons/directories listable, and single-brand /
+  // single-topic pages (one-company news, opinion pieces, single-product profiles)
+  // NOT listable. Absent verdict (legacy audits) = keep, so nothing is lost.
+  const listableOk = (e: CitationAnalysisEntry): boolean =>
+    typeof e.get_listable === "boolean" ? e.get_listable : true;
   const keepActionable = (g: (typeof groups)[number], e: CitationAnalysisEntry) =>
-    !isHomepage(e) && nicheOk(g, e);
+    !isHomepage(e) && nicheOk(g, e) && listableOk(e);
   const actionableGroups = actionableRaw
     .map((g) => {
       const entries = g.entries.filter((e) => keepActionable(g, e));
@@ -372,7 +378,10 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     0
   );
   const offNicheHidden = actionableRaw.reduce(
-    (n, g) => n + g.entries.filter((e) => !isHomepage(e) && !nicheOk(g, e)).length,
+    (n, g) =>
+      n +
+      g.entries.filter((e) => !isHomepage(e) && (!nicheOk(g, e) || !listableOk(e)))
+        .length,
     0
   );
   const landscapeGroups = groups.filter((g) => !ACTIONABLE.has(g.key));

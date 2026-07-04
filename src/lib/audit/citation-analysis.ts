@@ -524,6 +524,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
       );
       contentEntries.forEach((e, i) => {
         e.niche_relevant = verdicts[i].relevant;
+        e.get_listable = verdicts[i].listable;
         if (verdicts[i].reason) e.get_listed_reason = verdicts[i].reason;
       });
     } catch (err: any) {
