@@ -238,7 +238,7 @@ const STATUS_UA =
  */
 async function resolveUrlStatus(url: string): Promise<{ status: number; finalUrl: string }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+  const timer = setTimeout(() => controller.abort(), 5000);
   try {
     let res = await fetch(url, {
       method: 'HEAD',
@@ -328,18 +328,35 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     }
   }
   const allUrls = Array.from(urlMeta.keys());
-  const pages = await resolveSignals(supabase, allUrls, env);
 
-  // Status + final-URL probe — but only where needed, to bound subrequests:
-  // URLs the content fetch couldn't parse (dead candidates: 404, block, non-html)
-  // and Gemini vertexaisearch redirects (whose real destination we must resolve).
-  // Pages that fetched fine are alive (2xx) and already carry their real URL.
-  const resolveTargets = allUrls.filter(
-    (u) => !pages.has(u) || u.includes('vertexaisearch.cloud.google.com')
-  );
-  const probed = await mapWithConcurrency(resolveTargets, 8, (u) => resolveUrlStatus(u));
+  // Bound the heaviest cost on large (20-query) audits: only fetch page signals
+  // for the top-N URLs by cross-LLM leverage. Without this, a 200+ URL audit
+  // exhausts the Worker subrequest budget and the stage is killed mid-run,
+  // hanging citation_status on 'analyzing'. Lower-ranked sources still appear —
+  // just without brand-presence / status.
+  const PAGE_FETCH_CAP = 150;
+  const rankedUrls = allUrls.slice().sort((a, b) => {
+    const ma = urlMeta.get(a)!;
+    const mb = urlMeta.get(b)!;
+    if (mb.llms.size !== ma.llms.size) return mb.llms.size - ma.llms.size;
+    return mb.queries.size - ma.queries.size;
+  });
+  const fetchUrls = rankedUrls.slice(0, PAGE_FETCH_CAP);
+  const pages = await resolveSignals(supabase, fetchUrls, env);
+
+  // Status probe — ONLY the dead candidates among the fetched set (content fetch
+  // returned nothing: 404 / block / non-html), hard-capped so it can never
+  // dominate the budget. Gemini vertexaisearch redirects are resolved to their
+  // real domain-root DETERMINISTICALLY below (no network). Never throws.
+  const STATUS_PROBE_CAP = 40;
+  const deadCandidates = fetchUrls.filter((u) => !pages.has(u)).slice(0, STATUS_PROBE_CAP);
   const statusByUrl = new Map<string, { status: number; finalUrl: string }>();
-  resolveTargets.forEach((u, i) => statusByUrl.set(u, probed[i]));
+  try {
+    const probed = await mapWithConcurrency(deadCandidates, 10, (u) => resolveUrlStatus(u));
+    deadCandidates.forEach((u, i) => statusByUrl.set(u, probed[i]));
+  } catch (e: any) {
+    console.error('[citations] status probe failed (non-fatal):', e?.message);
+  }
 
   const analysis: CitationAnalysisEntry[] = allUrls.map((url) => {
     const meta = urlMeta.get(url)!;
@@ -348,14 +365,22 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
       ? brandPresence({ title: page.signals.title, text_sample: page.text_sample }, you, brandDomain)
       : { brand_present: false, match_type: 'none' as const };
     const probe = statusByUrl.get(url);
-    // Alive pages (in `pages`) → 2xx; probed URLs → their real status; else unknown.
+    // Alive pages (in `pages`) → their 2xx status; probed dead-candidates → real
+    // status; everything else → unknown (undefined, never treated as dead).
     const status_code = probe
       ? probe.status || undefined
       : page
         ? page.signals.http_status
         : undefined;
-    const resolved_url =
-      probe && probe.finalUrl && probe.finalUrl !== url ? probe.finalUrl : undefined;
+    // Gemini's vertexaisearch proxy → clean domain-root (the real domain rides in
+    // meta.domain). No redirect-follow subrequest. Other probed URLs keep their
+    // resolved final URL when it differs.
+    const isGeminiProxy = url.includes('vertexaisearch.cloud.google.com');
+    const resolved_url = isGeminiProxy
+      ? `https://${meta.domain}/`
+      : probe && probe.finalUrl && probe.finalUrl !== url
+        ? probe.finalUrl
+        : undefined;
     return {
       url,
       domain: meta.domain,

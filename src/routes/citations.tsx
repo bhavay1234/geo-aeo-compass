@@ -139,8 +139,9 @@ function Row({
             style={{
               display: "block",
               fontSize: 11,
-              color: "var(--accent, #4a6cf7)",
-              textDecoration: "none",
+              color: "var(--ink-2)",
+              textDecoration: "underline",
+              textUnderlineOffset: 2,
               marginTop: 3,
               overflowWrap: "anywhere",
               wordBreak: "break-all",

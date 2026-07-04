@@ -155,6 +155,30 @@ export async function handleApiRoute(request: Request): Promise<Response> {
       return Response.json({ ok: true });
     }
 
+    // Re-run ONLY the citation-analysis stage for an existing audit (no
+    // re-polling). Recovers an audit whose citation stage was killed mid-run
+    // (hung on 'analyzing'), and lets the operator refresh categorization/status
+    // after a logic change. Idempotent — analyzeCitations overwrites its outputs.
+    if (path === '/api/audit/recite' && method === 'POST') {
+      const body = (await request.json().catch(() => ({}))) as { audit_id?: string };
+      const auditId = body.audit_id?.trim();
+      if (!auditId) return jsonError(400, 'audit_id is required');
+      await supabase.from('audits').update({ citation_status: 'analyzing' }).eq('id', auditId);
+      try {
+        await env.AUDIT_QUEUE.send({
+          audit_id: auditId,
+          query_text: '',
+          query_category: '',
+          query_index: -1,
+          kind: 'citations',
+        });
+      } catch (e: any) {
+        await supabase.from('audits').update({ citation_status: 'failed' }).eq('id', auditId);
+        return jsonError(500, `enqueue failed: ${e?.message || 'unknown'}`);
+      }
+      return Response.json({ ok: true, audit_id: auditId });
+    }
+
     if (path === '/api/audit/status' && method === 'GET') {
       const id = url.searchParams.get('id');
       if (!id?.trim()) return jsonError(400, 'id query param is required');
