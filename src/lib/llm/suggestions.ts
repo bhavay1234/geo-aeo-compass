@@ -430,6 +430,78 @@ export async function classifyCompetitors(
   }
 }
 
+const NICHE_SYSTEM =
+  'You decide which cited ARTICLES are roundups/lists/directories genuinely IN ' +
+  "the audited brand's category — places where getting THIS brand listed would " +
+  'improve its visibility in AI answers. You are given the brand (name, category, ' +
+  'positioning) and a numbered list of article titles (+url). Return the indices ' +
+  'that are truly in the brand\'s niche. DROP articles that merely share a WORD but ' +
+  'are a different domain — e.g. for a supply-chain / logistics / global-trade ' +
+  'software brand, DROP stock/forex "trading" guides, "trade finance"/accounting ' +
+  'docs, HR/recruiting lists, generic AI-framework or developer tutorials, and ' +
+  'roundups for unrelated industries. Judge by MEANING, not keyword overlap. When ' +
+  'unsure, EXCLUDE. Return ONLY JSON {"relevant":[indices]}.';
+
+/**
+ * Judge which cited articles (roundups/listicles) are genuinely in the brand's
+ * niche — semantic, so it separates "global trade software" from "trade finance"
+ * or stock "trading". Batched (≤50/call). Returns a boolean per input item
+ * (true = in-niche / keep). On no key / failure returns all-true so nothing is
+ * wrongly hidden.
+ */
+export async function classifyNicheRelevance(
+  input: {
+    brandName: string;
+    category: string;
+    positioning: string;
+    items: Array<{ title: string; url: string }>;
+  },
+  env: Env
+): Promise<boolean[]> {
+  const out = new Array<boolean>(input.items.length).fill(true);
+  if (!env.OPENAI_API_KEY || input.items.length === 0) return out;
+  const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  const BATCH = 50;
+  for (let start = 0; start < input.items.length; start += BATCH) {
+    const batch = input.items.slice(start, start + BATCH);
+    const user = JSON.stringify({
+      brand: input.brandName,
+      category: input.category || '(unknown)',
+      positioning: input.positioning.slice(0, 300),
+      articles: batch.map((it, i) => ({ i, title: it.title.slice(0, 140), url: it.url.slice(0, 160) })),
+    });
+    try {
+      const completion = await withTimeout(
+        openai.chat.completions.create({
+          model: MODEL,
+          temperature: 0.1,
+          max_tokens: 500,
+          messages: [
+            { role: 'system', content: NICHE_SYSTEM },
+            { role: 'user', content: user },
+          ],
+        }),
+        15000
+      );
+      const parsed = JSON.parse(
+        stripFences(completion.choices[0]?.message?.content || '')
+      ) as { relevant?: unknown };
+      const rel = new Set(
+        Array.isArray(parsed.relevant)
+          ? (parsed.relevant as unknown[]).filter((n): n is number => typeof n === 'number')
+          : []
+      );
+      // Default to EXCLUDE within a successfully-judged batch (the model returns
+      // only the in-niche indices); a parse/HTTP failure below keeps all (true).
+      for (let i = 0; i < batch.length; i++) out[start + i] = rel.has(i);
+    } catch (err: any) {
+      console.error('[niche-relevance] batch failed (keeping all):', err?.message);
+      // leave this batch's entries as true (keep)
+    }
+  }
+  return out;
+}
+
 /**
  * Pick the final buyer queries for a Brand-DNA audit from DataForSEO Labs
  * candidates, with real judgment — DROPs off-category keywords that merely

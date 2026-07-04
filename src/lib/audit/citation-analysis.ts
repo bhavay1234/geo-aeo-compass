@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, type Env } from '../db/supabase';
-import { normalizeDomain, competitorToDomain } from './source-classifier';
+import { normalizeDomain, competitorToDomain, citationCategory } from './source-classifier';
 import {
   fetchPageSignals,
   brandPresence,
@@ -9,7 +9,11 @@ import {
 } from './page-fetch';
 import { cheerioScrape, crawlOwnSite, type CrawledPage } from './apify';
 import { decisiveFactor, buildInfluenceFallback, type InfluenceSide } from './why-verdict';
-import { mapWithConcurrency, inferInfluenceVerdict } from '../llm/suggestions';
+import {
+  mapWithConcurrency,
+  inferInfluenceVerdict,
+  classifyNicheRelevance,
+} from '../llm/suggestions';
 import type {
   Citation,
   CitationRole,
@@ -275,7 +279,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
 
   const { data: audit } = await supabase
     .from('audits')
-    .select('id, brand_name, domain, competitors, insights')
+    .select('id, brand_name, domain, competitors, insights, positioning, category')
     .eq('id', auditId)
     .single();
   if (!audit) return;
@@ -429,6 +433,41 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     return b.query_count - a.query_count;
   });
   const targetNamedUrls = new Set(analysis.filter((a) => a.brand_present).map((a) => a.url));
+
+  // Semantic niche filter for roundup/listicle sources — separates a genuine
+  // in-category "best X" list from one that merely shares a word ("trade
+  // finance" / stock "trading" for a supply-chain brand). Keyword matching can't
+  // tell these apart; an LLM judgment can. Mutates entries in place; non-fatal.
+  const titleByUrl = new Map<string, string>();
+  for (const p of polls)
+    for (const c of p.citations ?? [])
+      if (c.url && c.title && !titleByUrl.has(c.url)) titleByUrl.set(c.url, c.title);
+  const listicleEntries = analysis.filter(
+    (e) =>
+      citationCategory(e.resolved_url || e.url, e.domain, e.source_type, competitorDomains) ===
+      'listicles'
+  );
+  if (listicleEntries.length > 0) {
+    try {
+      const verdicts = await classifyNicheRelevance(
+        {
+          brandName: you,
+          category: (audit.category as string | null) || '',
+          positioning: (audit.positioning as string | null) || '',
+          items: listicleEntries.map((e) => ({
+            title: titleByUrl.get(e.url) || '',
+            url: e.resolved_url || e.url,
+          })),
+        },
+        env
+      );
+      listicleEntries.forEach((e, i) => {
+        e.niche_relevant = verdicts[i];
+      });
+    } catch (err: any) {
+      console.error('[citations] niche classify failed (non-fatal):', err?.message);
+    }
+  }
 
   await supabase
     .from('audits')

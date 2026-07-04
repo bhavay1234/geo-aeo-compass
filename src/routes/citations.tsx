@@ -259,7 +259,10 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     return terms;
   }, [audit, polls]);
   const isNicheRelevant = (e: CitationAnalysisEntry): boolean => {
-    if (nicheTerms.size < 3) return true; // too little vocabulary to judge — keep
+    // Prefer the LLM's semantic verdict (handles "trade finance" vs "global
+    // trade"); fall back to the keyword heuristic for pre-classifier audits.
+    if (typeof e.niche_relevant === "boolean") return e.niche_relevant;
+    if (nicheTerms.size < 3) return true;
     const hay = `${titleByUrl.get(e.url) ?? ""} ${e.resolved_url || e.url}`.toLowerCase();
     for (const t of nicheTerms) if (hay.includes(t)) return true;
     return false;

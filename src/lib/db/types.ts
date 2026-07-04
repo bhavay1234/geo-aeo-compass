@@ -164,6 +164,10 @@ export interface CitationAnalysisEntry {
   /** Final URL after redirects — the real destination for Gemini's
    *  vertexaisearch grounding-redirect proxies. Absent = use `url`. */
   resolved_url?: string;
+  /** For roundup/listicle sources: did an LLM judge this list to be in the
+   *  brand's actual niche (vs merely sharing a word — "trade finance" / stock
+   *  "trading" for a supply-chain brand)? Absent = not judged (kept). */
+  niche_relevant?: boolean;
 }
 
 /** Which of the three influence factors most likely drove a naming. */
