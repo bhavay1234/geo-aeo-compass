@@ -150,8 +150,16 @@ export async function dfsLlmJson(
     // Model sometimes wraps JSON in prose — grab the outermost object.
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
-    if (start === -1 || end <= start) return null;
-    return JSON.parse(text.slice(start, end + 1));
+    if (start === -1 || end <= start) {
+      console.error('[dfs-llm-json] no JSON object in reply:', text.slice(0, 200));
+      return null;
+    }
+    try {
+      return JSON.parse(text.slice(start, end + 1));
+    } catch {
+      console.error('[dfs-llm-json] JSON.parse failed:', text.slice(0, 200));
+      return null;
+    }
   } catch (err: any) {
     console.error('[dfs-llm-json] failed:', err?.message);
     return null;

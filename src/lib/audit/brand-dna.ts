@@ -41,7 +41,10 @@ export interface DnaResult {
 
 const DNA_SYSTEM =
   'You distill a company website into its Brand DNA. Given scraped page ' +
-  'content, return ONLY valid JSON (no markdown): {"brand_name": string, ' +
+  'content, return ONLY valid JSON (no markdown, no prose, no refusals). If ' +
+  'the scraped content is thin, empty, or unreadable, use your own knowledge ' +
+  'of the company at the given domain instead — ALWAYS return the JSON. ' +
+  'Schema: {"brand_name": string, ' +
   '"positioning": string (one sentence: who it serves + what it does + wedge), ' +
   '"category": string (2-4 word product category buyers would search), ' +
   '"products": string[] (up to 4 named products/modules), ' +
@@ -141,16 +144,19 @@ export async function buildBrandDna(
     throw new Error(`Could not read ${domain} — the site may block scrapers.`);
   }
 
+  const thin = page.text_sample.length < 300;
   const parsed = (await dfsLlmJson(
     DNA_SYSTEM,
     JSON.stringify({
       domain,
       title: page.signals.title,
       h1: page.signals.h1,
+      content_thin: thin,
       content: page.text_sample.slice(0, 4000),
     }),
     env
   )) as Partial<BrandDna> | null;
+  if (!parsed) console.error('[dna] synthesis returned no JSON for', domain, 'thin:', thin);
 
   const core = normalizeDomain(domain).split('.')[0] || domain;
   const dna: BrandDna = {
@@ -193,7 +199,7 @@ export async function buildBrandDna(
         (intentMode === 'transactional'
           ? 'ALL must have transactional/commercial intent (best X, X vs Y, top X, X pricing).'
           : 'Mix of commercial and informational intent.') +
-        ' Never include the brand name except in comparison queries.',
+        ' Never include the brand name except in comparison queries. Avoid year references.',
       JSON.stringify({ dna }),
       env
     )) as { queries?: unknown } | null;
