@@ -683,12 +683,24 @@ function PollBody({
               competitorJudged
             );
             void ownNorm;
+            // Full cited URL — Gemini's vertexaisearch proxy has no deep path in
+            // the raw poll citation, so show a clean domain-root for it.
+            const fullUrl = c.url.includes("vertexaisearch.cloud.google.com")
+              ? `https://${c.domain}/`
+              : c.url;
             return (
               <div className="tm-src" key={`${c.url}-${i}`}>
                 <span className="o">{i + 1}</span>
-                <div className="d">
-                  <a href={c.url} target="_blank" rel="noopener noreferrer">
-                    {c.domain}
+                <div className="d" style={{ minWidth: 0 }}>
+                  <a
+                    href={c.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mono"
+                    style={{ wordBreak: "break-all", overflowWrap: "anywhere", fontSize: 11 }}
+                    title={fullUrl}
+                  >
+                    {fullUrl}
                   </a>
                   <small>{tag.subtype}</small>
                 </div>
