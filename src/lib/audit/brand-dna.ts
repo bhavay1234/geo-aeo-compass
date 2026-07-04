@@ -349,12 +349,14 @@ export async function buildBrandDna(
   if (queries.length < 5) {
     source = 'llm';
     const gen = (await dfsLlmJson(
-      'Return ONLY valid JSON {"queries":string[]} with exactly 20 search ' +
-        'queries buyers in this category would ask an AI assistant. ' +
+      'Return ONLY valid JSON {"queries":string[]} with exactly 20 CATEGORY ' +
+        'search queries buyers would ask an AI assistant. ' +
         (intentMode === 'transactional'
-          ? 'All transactional/commercial intent (best X, X vs Y, top X, X pricing).'
+          ? 'All transactional/commercial intent (best X, top X, X pricing, X alternatives).'
           : 'Mix commercial and informational.') +
-        ' No brand names except comparisons. No year references.',
+        ' Do NOT use the audited company\'s own name — no "[brand] pricing", ' +
+        '"[brand] alternatives", "[brand] vs traditional/legacy/other". Write the ' +
+        'queries a buyer types BEFORE they know this brand. No year references.',
       // Compact — DFS user_prompt cap (~500 chars).
       `Company: ${dna.brand_name} (${dna.domain}). Category: ${dna.category || 'unknown'}. Positioning: ${dna.positioning.slice(0, 200)}`.slice(0, 460),
       env
@@ -362,7 +364,16 @@ export async function buildBrandDna(
     const llmQueries = Array.isArray(gen?.queries)
       ? (gen!.queries as unknown[]).filter((q): q is string => typeof q === 'string')
       : [];
-    queries = llmQueries.slice(0, 20).map((keyword) => ({
+    // Deterministic guard: drop own-brand-nav queries the model still slips in
+    // ("project44 pricing and packages", "project44 alternatives"). Keep genuine
+    // "[brand] vs [competitor]" comparisons only.
+    const brandLc = dna.brand_name.trim().toLowerCase();
+    const cleaned = llmQueries.filter((q) => {
+      const lc = q.toLowerCase();
+      if (brandLc && lc.includes(brandLc)) return /\bvs\b|\bversus\b/.test(lc);
+      return true;
+    });
+    queries = cleaned.slice(0, 20).map((keyword) => ({
       keyword,
       volume: 0,
       intent: intentMode === 'transactional' ? 'commercial' : 'mixed',

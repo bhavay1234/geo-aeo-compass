@@ -547,6 +547,25 @@ export async function finalizeAuditFast(
  * Caveat: positioning + competitor judgments are page-context inference, not
  * ground truth (a homepage scrape is the v1.1 Apify upgrade).
  */
+/** Parent brand for a group of variant names sharing one company: their common
+ *  leading words ("SAP Transportation Management" + "SAP Integrated Business
+ *  Planning" → "SAP"); falls back to the shortest name when there's no shared
+ *  prefix. */
+function commonBrandName(names: string[]): string {
+  if (names.length === 1) return names[0];
+  const wordLists = names.map((n) => n.trim().split(/\s+/));
+  const minLen = Math.min(...wordLists.map((w) => w.length));
+  const common: string[] = [];
+  for (let i = 0; i < minLen; i++) {
+    const w = wordLists[0][i];
+    if (wordLists.every((wl) => wl[i].toLowerCase() === w.toLowerCase())) common.push(w);
+    else break;
+  }
+  return common.length > 0
+    ? common.join(' ')
+    : names.reduce((a, b) => (b.length < a.length ? b : a));
+}
+
 export async function enrichAudit(auditId: string, env: Env): Promise<void> {
   const supabase = getSupabaseAdmin(env);
   try {
@@ -783,6 +802,39 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       }
     }
 
+    // Deterministic consolidation: the LLM's variant-merge is inconsistent
+    // run-to-run (e.g. it left "SAP Transportation Management" and "SAP
+    // Integrated Business Planning" as two cards). Now that every entry carries
+    // a REAL domain, collapse any that resolved to the SAME domain into one —
+    // parent name = shared leading words, strongest tier (direct > adjacent).
+    // Entries with no domain can't be safely merged and pass through as-is.
+    const byDomain = new Map<
+      string,
+      { names: string[]; tier: 'direct' | 'adjacent'; domain: string }
+    >();
+    const noDomain: Array<{ name: string; tier: 'direct' | 'adjacent'; domain?: string }> = [];
+    for (const c of classifiedCompetitors) {
+      if (!c.domain) {
+        noDomain.push(c);
+        continue;
+      }
+      const g = byDomain.get(c.domain);
+      if (g) {
+        g.names.push(c.name);
+        if (c.tier === 'direct') g.tier = 'direct';
+      } else {
+        byDomain.set(c.domain, { names: [c.name], tier: c.tier, domain: c.domain });
+      }
+    }
+    const dedupedCompetitors = [
+      ...Array.from(byDomain.values()).map((g) => ({
+        name: commonBrandName(g.names),
+        tier: g.tier,
+        domain: g.domain,
+      })),
+      ...noDomain,
+    ];
+
     // 6) Recompute insights/summary with the corrected competitor count, then
     //    persist in THREE staged writes so a missing/unmigrated column can't
     //    cascade-drop the others (the cause of empty competitors/verdicts):
@@ -792,9 +844,9 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
     //    Verdicts are also the slowest (N mini-calls), so writing the core
     //    first means competitor data lands even if verdicts are slow or fail.
     const insights = await computeInsights(auditId, env);
-    if (classifiedCompetitors.length > 0) insights.competitor_brands = classifiedCompetitors;
+    if (dedupedCompetitors.length > 0) insights.competitor_brands = dedupedCompetitors;
     insights.discovered_competitor_count =
-      classifiedCompetitors.length || discoveredBrands.length;
+      dedupedCompetitors.length || discoveredBrands.length;
     const summary = await computeSummary(auditId, brandName, namedCompetitors, env);
     summary.headline = buildInsightHeadline(summary, insights);
 
