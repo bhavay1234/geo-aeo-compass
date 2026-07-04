@@ -557,8 +557,12 @@ export async function judgeGetListedSources(
  * candidates, with real judgment — DROPs off-category keywords that merely
  * share words ("transportation LEARNING management"), DIVERSIFIES across
  * sub-topics instead of 20 rewordings of one phrase, and honors intent mode.
- * Returns chosen keywords VERBATIM (so the caller maps back real volumes).
- * Returns [] when no key / on failure so the caller falls back to heuristics.
+ * Because each query is asked to a COLD assistant with no memory of the brand,
+ * it also drops or minimally category-anchors AMBIGUOUS keywords that would
+ * otherwise resolve to a different vertical ("global trade platforms" → stock
+ * trading / B2B marketplaces). Keywords are returned verbatim EXCEPT such
+ * disambiguating rewrites (the caller tolerates a keyword absent from the volume
+ * map — it just carries volume 0). Returns [] when no key / on failure.
  */
 export async function selectBuyerQueries(
   input: {
@@ -577,16 +581,30 @@ export async function selectBuyerQueries(
       ? 'Strongly prefer transactional/commercial intent (best X, X vs Y, top X, X pricing, X alternatives).'
       : 'Allow a mix of commercial and informational intent.';
   const system =
-    `You select buyer search queries for an AI-visibility (AEO) audit. From the ` +
+    `You select buyer search queries for an AI-visibility (AEO) audit. Each query ` +
+    `is asked to a COLD AI assistant with NO memory of this brand or user — so a ` +
+    `query must SELF-DISAMBIGUATE: on its own words it must signal THIS category/` +
+    `vertical, or a cold assistant will answer about a different industry. From the ` +
     `CANDIDATE keywords (each with monthly search volume "v"), choose up to ${limit} ` +
-    `that best capture how real buyers research THIS product category in AI ` +
-    `assistants. Rules: (1) genuinely in the brand's category — DROP keywords that ` +
-    `merely share words but are a DIFFERENT software category (e.g. "transportation ` +
-    `learning management", "document management" for a freight-visibility brand); ` +
-    `(2) DIVERSE — cover distinct sub-topics/use-cases, NEVER many near-duplicate ` +
-    `rewordings of one phrase; (3) ${intentLine} (4) drop location-specific ("... ` +
-    `india", city/state) and navigational lookups. Return ONLY JSON ` +
-    `{"queries":[string]} using keywords EXACTLY as given (verbatim), no new text.`;
+    `that best capture how real buyers research THIS product category. Rules:\n` +
+    `(1) genuinely in the brand's category — DROP keywords that merely share a word ` +
+    `but name a DIFFERENT category (e.g. "transportation learning management", ` +
+    `"document management" for a freight-visibility brand).\n` +
+    `(2) AMBIGUITY GUARD — DROP or REWRITE any keyword a cold assistant would read ` +
+    `as a different vertical. E.g. for a supply-chain/logistics brand: "global ` +
+    `trade platforms" reads as B2B sourcing marketplaces (Alibaba) or STOCK ` +
+    `trading; "trade platforms" reads as stock/forex brokers. Prefer the ` +
+    `unambiguous category phrasing. If a valuable keyword is ambiguous, MINIMALLY ` +
+    `rewrite it to the brand's category (e.g. "global trade platforms" → "global ` +
+    `trade management software", "best trade platforms" → "best supply chain ` +
+    `visibility platforms") so the cold assistant lands in the right vertical. ` +
+    `Never invent a query outside the category.\n` +
+    `(3) DIVERSE — cover distinct sub-topics/use-cases, NEVER many near-duplicate ` +
+    `rewordings of one phrase.\n` +
+    `(4) ${intentLine}\n` +
+    `(5) drop location-specific ("... india", city/state) and navigational lookups.\n` +
+    `Return ONLY JSON {"queries":[string]}. Use candidate keywords verbatim UNLESS ` +
+    `rule (2) requires a minimal category-anchoring rewrite.`;
   const user = JSON.stringify({
     brand: input.brandName,
     category: input.category || '(unknown)',
