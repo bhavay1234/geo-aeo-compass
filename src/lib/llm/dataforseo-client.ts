@@ -57,28 +57,47 @@ async function callDFS(
 }
 
 /**
- * ChatGPT via DataForSEO — used when OPENAI_API_KEY is not configured, so the
- * whole tool can run on DFS credentials alone. Same normalized result shape as
- * the direct-OpenAI poller.
+ * ChatGPT via DataForSEO. Uses the LLM SCRAPER (llm_scraper/live/advanced),
+ * NOT llm_responses — the scraper returns ChatGPT's real Sources panel (the
+ * dozens of third-party links the chatgpt.com UI shows: listicles, review
+ * sites, market-research, editorials), whereas llm_responses only returns the
+ * model's sparse inline citations (typically a handful of recommended vendors'
+ * homepages). This is THE source-coverage lever. Same normalized result shape
+ * as the direct-OpenAI poller; falls back to llm_responses (gpt-4o) if the
+ * scraper errors or returns nothing.
  */
 export async function pollChatGPTviaDFS(
   query: string,
   env: Env
 ): Promise<OpenAIPollResult> {
+  try {
+    const data = await callDFS(
+      '/ai_optimization/chat_gpt/llm_scraper/live/advanced',
+      [
+        {
+          keyword: query,
+          location_code: 2840, // USA
+          language_code: 'en',
+          force_web_search: true, // guarantee ChatGPT runs web search
+        },
+      ],
+      env,
+      150_000 // scraper live is up to 120s
+    );
+    const norm = normalizeScraper(data);
+    if (norm.citations.length > 0 || norm.response_text) return norm;
+    console.error('[dfs-scraper] empty result, falling back to llm_responses');
+  } catch (err: any) {
+    console.error('[dfs-scraper] failed, falling back:', err?.message);
+  }
+  // Fallback: llm_responses with gpt-4o (grounds, but sparser sources).
   const data = await callDFS(
     '/ai_optimization/chat_gpt/llm_responses/live',
     [
       {
         user_prompt: query,
-        // gpt-4o ACTUALLY grounds via DFS — a live probe returned 15 real
-        // `annotations` (third-party comparison/editorial pages) for a product
-        // query, vs ZERO for gpt-5.3-chat-latest and gpt-4o-search-preview
-        // (which answered from training, forcing the prose-homepage fallback).
-        // The model choice is the difference between real cited sources and a
-        // list of recommended products linked to their own homepages.
         model_name: 'gpt-4o',
         web_search: true,
-        // Nudge the model to search + cite even for shopping-style prompts.
         system_message:
           'When the question involves products, brands, comparisons, or ' +
           'recommendations, use web search to ground your answer and cite ' +
@@ -87,42 +106,69 @@ export async function pollChatGPTviaDFS(
     ],
     env
   );
-  return normalize(data, 'chatgpt', 'gpt-4o (dataforseo)');
+  return normalize(data, 'chatgpt', 'gpt-4o (dataforseo fallback)');
 }
 
-/** TEMPORARY DIAGNOSTIC — dump the llm_scraper/live/advanced response shape so
- *  we can wire the real ChatGPT Sources panel (title/url/snippet per source). */
-export async function probeScraper(query: string, env: Env): Promise<AnyObj> {
-  const data = (await callDFS(
-    '/ai_optimization/chat_gpt/llm_scraper/live/advanced',
-    [
-      {
-        keyword: query,
-        location_code: 2840,
-        language_code: 'en',
-        force_web_search: true,
-      },
-    ],
-    env,
-    150_000
-  )) as AnyObj;
-  const tasks = (data?.tasks as AnyObj[] | undefined) ?? [];
+/**
+ * Normalize a chat_gpt/llm_scraper/live/advanced response. The scraper exposes
+ * `sources` — one `chat_gpt_source` per link in ChatGPT's Sources panel, each
+ * with a real deep URL + title + publication_date — which we treat as the
+ * grounded citation set. `markdown` holds the full answer text.
+ */
+function normalizeScraper(raw: unknown): OpenAIPollResult {
+  const outer = raw as AnyObj;
+  const tasks = (outer?.tasks as AnyObj[] | undefined) ?? [];
   const t0 = tasks[0] ?? {};
   const r0 = ((t0.result as AnyObj[] | undefined) ?? [])[0] ?? {};
+
+  const response_text = typeof r0.markdown === 'string' ? (r0.markdown as string) : '';
   const sources = (r0.sources as AnyObj[] | undefined) ?? [];
-  const items = (r0.items as AnyObj[] | undefined) ?? [];
+
+  const citations: RawCitation[] = [];
+  const raw_citations: RawInlineCitation[] = [];
+  const seen = new Set<string>();
+
+  sources.forEach((s, i) => {
+    const url = typeof s.url === 'string' ? s.url : '';
+    if (!url) return;
+    const title =
+      (typeof s.title === 'string' && s.title) ||
+      (typeof s.source_name === 'string' && s.source_name) ||
+      '';
+    const domain =
+      (typeof s.domain === 'string' && s.domain
+        ? s.domain.toLowerCase().replace(/^www\./, '')
+        : '') || extractDomain(url);
+    raw_citations.push({
+      order: i,
+      url,
+      title,
+      domain,
+      start_index: null,
+      end_index: null,
+      anchor_text: '',
+      grounded: true,
+    });
+    if (!seen.has(url)) {
+      seen.add(url);
+      citations.push({ url, title, domain, grounded: true });
+    }
+  });
+
+  const errMsg =
+    typeof t0.status_message === 'string' && t0.status_code !== 20000
+      ? String(t0.status_message)
+      : undefined;
+
   return {
-    status_code: t0.status_code,
-    status_message: t0.status_message,
-    result_keys: Object.keys(r0),
-    sources_count: sources.length,
-    sources_sample: sources.slice(0, 4),
-    items_count: items.length,
-    item_types: Array.from(
-      new Set(items.map((i) => String((i as AnyObj).type ?? '')))
-    ),
-    markdown_len:
-      typeof r0.markdown === 'string' ? (r0.markdown as string).length : 0,
+    response_text,
+    citations,
+    raw_citations,
+    error:
+      response_text || citations.length
+        ? undefined
+        : errMsg ?? 'DFS scraper: empty response',
+    model_used: 'chatgpt (dfs scraper)',
   };
 }
 
