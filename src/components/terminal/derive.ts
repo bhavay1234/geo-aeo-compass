@@ -11,9 +11,82 @@ import {
   competitorToDomain,
   citationCategory,
   CITATION_CATEGORY_META,
+  isSingleProductPage,
   type CitationCategory,
 } from "@/lib/audit/source-classifier";
 import { isBrandLike, brandInProse } from "@/lib/audit/prose-brands";
+
+/** Categories that are get-listable off-page targets (vs vendor/competitor
+ *  landscape). Mirrors the Citations tab's ACTIONABLE set. */
+const ACTIONABLE_CATS = new Set<CitationCategory>([
+  "listicles",
+  "reviews",
+  "editorial",
+  "pr",
+  "reddit",
+  "youtube",
+  "linkedin",
+  "community",
+]);
+
+export interface GetListedTarget {
+  url: string;
+  domain: string;
+  title: string;
+  category: CitationCategory;
+  label: string;
+  llms: LlmSource[];
+  queryCount: number;
+  reason?: string;
+}
+
+/**
+ * The off-page worklist — third-party pages the LLMs cite that the brand is
+ * MISSING from, ranked by cross-LLM leverage (cited by more models = higher
+ * payoff to land). This is the core "where to get listed" answer, shared by the
+ * Summary rollup and the Citations tab. Excludes homepages, single-product
+ * pages, off-niche, non-listable, dead links, and pages the brand already
+ * appears on.
+ */
+export function topGetListedTargets(
+  audit: Audit,
+  entries: CitationAnalysisEntry[],
+  titleByUrl?: Map<string, string>,
+  limit = 6
+): GetListedTarget[] {
+  const comp = competitorDomainSet(audit);
+  const out: GetListedTarget[] = [];
+  for (const e of entries) {
+    const link = e.resolved_url || e.url;
+    const cat = citationCategory(link, e.domain, e.source_type, comp);
+    if (!ACTIONABLE_CATS.has(cat)) continue;
+    if (e.brand_present) continue;
+    if (typeof e.get_listable === "boolean" && !e.get_listable) continue;
+    if (e.niche_relevant === false) continue;
+    if (isSingleProductPage(link)) continue;
+    if ((e.status_code ?? 200) >= 400) continue;
+    let isHome = false;
+    try {
+      isHome = new URL(link).pathname.replace(/\/+$/, "") === "";
+    } catch {
+      isHome = false;
+    }
+    if (isHome) continue;
+    out.push({
+      url: link,
+      domain: e.domain,
+      title: titleByUrl?.get(e.url) || "",
+      category: cat,
+      label: CITATION_CATEGORY_META[cat].label,
+      llms: e.llms_citing ?? [],
+      queryCount: e.query_count ?? 0,
+      reason: e.get_listed_reason,
+    });
+  }
+  return out
+    .sort((a, b) => b.llms.length - a.llms.length || b.queryCount - a.queryCount)
+    .slice(0, limit);
+}
 
 export interface CitationCategoryGroup {
   key: CitationCategory;

@@ -7,9 +7,15 @@ import {
   buildLlmScorecards,
   computeShareOfVoice,
   llmsPolled,
+  topGetListedTargets,
   type GapRow,
 } from "@/components/terminal/derive";
-import type { Audit, PollResult, LlmSource } from "@/lib/db/types";
+import type {
+  Audit,
+  PollResult,
+  LlmSource,
+  CitationAnalysisEntry,
+} from "@/lib/db/types";
 
 const LLM_LABEL: Record<LlmSource, string> = {
   chatgpt: "ChatGPT",
@@ -87,6 +93,16 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const sovFull = computeShareOfVoice(audit, polls);
   const llms = llmsPolled(audit);
   const scorecards = buildLlmScorecards(audit, polls);
+
+  // Off-page "where to get cited" rollup — the core AEO action, surfaced up top.
+  const citeEntries = (audit.citation_analysis ?? []) as CitationAnalysisEntry[];
+  const titleByUrl = new Map<string, string>();
+  for (const p of polls)
+    for (const c of p.citations ?? [])
+      if (c.url && c.title && !titleByUrl.has(c.url)) titleByUrl.set(c.url, c.title);
+  const getListed = topGetListedTargets(audit, citeEntries, titleByUrl, 6);
+  const citationsAnalyzing =
+    audit.citation_status === "analyzing" || audit.citation_status == null;
 
   // total = distinct queries (one per gap row after per-query aggregation).
   // Per-LLM answers = queries × LLMs — the buyer-facing denominator on multi-LLM
@@ -342,6 +358,99 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
           ))}
         </div>
       )}
+      {/* WHERE TO GET CITED — the off-page action, surfaced up top. Third-party
+          pages the LLMs pull from that don't mention the brand yet. */}
+      <div
+        style={{
+          padding: "16px 20px 18px",
+          borderBottom: "1px solid var(--grid-2)",
+          background: "var(--bg)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+          <h2
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              letterSpacing: ".06em",
+              textTransform: "uppercase",
+              color: "var(--hot)",
+              margin: 0,
+            }}
+          >
+            ↗ Where to get cited · off-page targets
+          </h2>
+          <Link
+            to="/citations"
+            className="mono"
+            style={{ fontSize: 10.5, color: "var(--ink-3)" }}
+          >
+            full worklist →
+          </Link>
+        </div>
+        <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "6px 0 12px", maxWidth: 900 }}>
+          Third-party pages the AI engines already pull from that{" "}
+          <b style={{ color: "var(--ink-2)" }}>don't mention {brand} yet</b> — the
+          highest-leverage places to get listed so you start showing up in answers.
+        </p>
+        {getListed.length === 0 ? (
+          <p style={{ fontSize: 12, color: "var(--ink-3)" }}>
+            {citationsAnalyzing
+              ? "◴ Analyzing where the AI engines source their answers…"
+              : "No missing off-page targets found for this run."}
+          </p>
+        ) : (
+          getListed.map((t, i) => (
+            <div
+              key={t.url}
+              className="tm-reveal"
+              style={{
+                display: "flex",
+                alignItems: "baseline",
+                gap: 10,
+                padding: "8px 0",
+                borderTop: i > 0 ? "1px solid var(--grid)" : "none",
+                animationDelay: `${i * 0.04}s`,
+              }}
+            >
+              <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", width: 18 }}>
+                {String(i + 1).padStart(2, "0")}
+              </span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <a
+                  href={t.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}
+                >
+                  {t.title || t.domain}
+                </a>
+                <span
+                  style={{
+                    fontSize: 10,
+                    marginLeft: 8,
+                    padding: "1px 5px",
+                    borderRadius: 3,
+                    background: "var(--panel-2)",
+                    color: "var(--ink-3)",
+                  }}
+                >
+                  {t.label}
+                </span>
+                {t.reason && (
+                  <div style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 2 }}>
+                    {t.reason}
+                  </div>
+                )}
+              </div>
+              <span className="mono" style={{ fontSize: 9.5, color: "var(--ink-3)", whiteSpace: "nowrap" }}>
+                {t.llms.map((l) => LLM_SHORT[l]).join(" · ")}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+
       <div className="tm-grid">
         {/* FOCAL: visibility gaps */}
       <div className="tm-panel tm-gap-span tm-reveal">
