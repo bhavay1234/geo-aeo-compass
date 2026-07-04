@@ -142,6 +142,8 @@ export async function dfsLlmJson(
       env
     );
     const norm = normalize(data, 'chatgpt', 'gpt-4o (dfs json)');
+    if (!norm.response_text && norm.error)
+      console.error('[dfs-llm-json] task error:', norm.error);
     const text = norm.response_text
       .replace(/^```(?:json)?\s*/i, '')
       .replace(/\s*```$/i, '')

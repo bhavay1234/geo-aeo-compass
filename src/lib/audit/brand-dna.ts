@@ -144,19 +144,21 @@ export async function buildBrandDna(
     throw new Error(`Could not read ${domain} — the site may block scrapers.`);
   }
 
-  const thin = page.text_sample.length < 300;
-  const parsed = (await dfsLlmJson(
-    DNA_SYSTEM,
-    JSON.stringify({
-      domain,
-      title: page.signals.title,
-      h1: page.signals.h1,
-      content_thin: thin,
-      content: page.text_sample.slice(0, 4000),
-    }),
-    env
-  )) as Partial<BrandDna> | null;
-  if (!parsed) console.error('[dna] synthesis returned no JSON for', domain, 'thin:', thin);
+  // DFS caps user_prompt at ~500 chars (live-verified: longer payloads fail
+  // with "Invalid Field: 'user_prompt'"). Send a COMPACT scrape digest —
+  // domain + title + H1 + a short snippet — and let the model's own knowledge
+  // of the domain fill the rest (knowledge-only DNA probe-verified excellent).
+  const compact = [
+    `Domain: ${domain}`,
+    page.signals.title ? `Title: ${page.signals.title.slice(0, 110)}` : '',
+    page.signals.h1 ? `H1: ${page.signals.h1.slice(0, 110)}` : '',
+    page.text_sample ? `Snippet: ${page.text_sample.slice(0, 170)}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 460);
+  const parsed = (await dfsLlmJson(DNA_SYSTEM, compact, env)) as Partial<BrandDna> | null;
+  if (!parsed) console.error('[dna] synthesis returned no JSON for', domain);
 
   const core = normalizeDomain(domain).split('.')[0] || domain;
   const dna: BrandDna = {
@@ -200,7 +202,8 @@ export async function buildBrandDna(
           ? 'ALL must have transactional/commercial intent (best X, X vs Y, top X, X pricing).'
           : 'Mix of commercial and informational intent.') +
         ' Never include the brand name except in comparison queries. Avoid year references.',
-      JSON.stringify({ dna }),
+      // Compact — DFS user_prompt cap (~500 chars).
+      `Company: ${dna.brand_name} (${dna.domain}). Category: ${dna.category || 'unknown'}. Positioning: ${dna.positioning.slice(0, 200)}`.slice(0, 460),
       env
     )) as { queries?: unknown } | null;
     const llmQueries = Array.isArray(gen?.queries)
