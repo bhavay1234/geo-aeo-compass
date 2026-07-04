@@ -287,77 +287,36 @@ function MethodologyNote() {
           below are captured verbatim from those runs.
           <br />
           <br />
-          We don't screenshot the live LLM UIs by default: it costs{" "}
-          <strong>~10× per query</strong>, and a logged-in screenshot reflects{" "}
-          <em>that account's</em> biased view, not a neutral buyer's. For a
-          client-facing captured artifact, use{" "}
-          <strong>"Capture actual response"</strong> on a ChatGPT answer below.
+          The verbatim answer + source list on each card <em>is</em> the record —
+          that's your proof artifact. We don't screenshot the live LLM UIs: it
+          costs <strong>~10× per query</strong>, and a logged-in screenshot (or
+          the "Try in ChatGPT" link) reruns in <em>that account's</em> personalized
+          session — useful to sanity-check, but <strong>not proof</strong>, because
+          it isn't the neutral buyer's view this audit measures.
         </div>
       )}
     </div>
   );
 }
 
-/** OPT-IN proof capture button (ChatGPT only) — calls the DFS scraper on demand
- *  (~10x cost) and surfaces the shareable check_url. */
-function CaptureButton({ query }: { query: string }) {
-  const [state, setState] = useState<
-    | { s: "idle" }
-    | { s: "loading" }
-    | { s: "done"; url: string | null; sources: number }
-    | { s: "error"; msg: string }
-  >({ s: "idle" });
-
-  const run = async () => {
-    setState({ s: "loading" });
-    try {
-      const res = await fetch("/api/query/capture", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
-      });
-      if (!res.ok) throw new Error(`capture ${res.status}`);
-      const j = (await res.json()) as { check_url?: string; sources?: number };
-      setState({ s: "done", url: j.check_url ?? null, sources: j.sources ?? 0 });
-    } catch (e: any) {
-      setState({ s: "error", msg: e?.message || "failed" });
-    }
-  };
-
-  if (state.s === "done") {
-    return (
-      <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
-        {state.url ? (
-          <a href={state.url} target="_blank" rel="noopener noreferrer" className="mono">
-            ↗ View captured response ({state.sources} sources)
-          </a>
-        ) : (
-          "captured — no shareable link returned"
-        )}
-      </span>
-    );
-  }
+/** Free "try it yourself" link — opens ChatGPT with the prompt prefilled. This
+ *  runs LIVE in the viewer's own (personalized) session, so it is NOT proof of
+ *  the audit; the cold-session answer + sources shown here are the record. Same
+ *  deep-link DFS's scraper returns as check_url, constructed for free (no ~10x
+ *  scraper call). */
+function OpenInChatGPT({ query }: { query: string }) {
+  const url = `https://chatgpt.com/?prompt=${encodeURIComponent(query)}&hints=search`;
   return (
-    <button
-      onClick={run}
-      disabled={state.s === "loading"}
-      title="Runs the DFS ChatGPT scraper on demand — ~10x the cost of a normal query"
-      style={{
-        background: "none",
-        border: "1px solid var(--grid)",
-        borderRadius: 4,
-        padding: "3px 8px",
-        cursor: state.s === "loading" ? "wait" : "pointer",
-        fontSize: 11,
-        color: "var(--ink-2)",
-      }}
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mono"
+      title="Opens ChatGPT with this prompt — runs live in YOUR personalized account, so it may differ from this cold-session audit. Not proof."
+      style={{ fontSize: 11, color: "var(--ink-3)", whiteSpace: "nowrap" }}
     >
-      {state.s === "loading"
-        ? "◴ capturing…"
-        : state.s === "error"
-          ? `⚠ ${state.msg} — retry`
-          : "◎ Capture actual response (~10× cost)"}
-    </button>
+      ↗ Try in ChatGPT (live)
+    </a>
   );
 }
 
@@ -760,7 +719,7 @@ function PollBody({
           <span>
             <span className="ai">{llmName.charAt(0)}</span> {llmName} answer · web search
           </span>
-          {llm === "chatgpt" && <CaptureButton query={poll.query_text} />}
+          {llm === "chatgpt" && <OpenInChatGPT query={poll.query_text} />}
         </div>
         <div className="txt">
           {poll.full_response

@@ -1,7 +1,6 @@
 import { getSupabaseAdmin } from '../db/supabase';
 import { buildBrandDna } from '../audit/brand-dna';
 import { getEnv } from '../server/runtime';
-import { captureChatGPT } from '../llm/dataforseo-client';
 
 /**
  * Plain-JSON HTTP API handler for /api/audit/*.
@@ -29,21 +28,6 @@ export async function handleApiRoute(request: Request): Promise<Response> {
   try {
     const env = getEnv();
     const supabase = getSupabaseAdmin(env);
-
-    // OPT-IN proof capture (~10x cost) — runs the DFS ChatGPT scraper on demand
-    // for ONE query and returns its shareable check_url. Never called by the
-    // audit pipeline; only when the operator clicks "Capture actual response".
-    if (path === '/api/query/capture' && method === 'POST') {
-      const body = (await request.json().catch(() => ({}))) as { query?: string };
-      const q = body.query?.trim();
-      if (!q) return jsonError(400, 'query is required');
-      try {
-        return Response.json(await captureChatGPT(q, env));
-      } catch (err: any) {
-        console.error('[api] capture failed:', err?.message);
-        return jsonError(502, err?.message || 'capture failed');
-      }
-    }
 
     if (path === '/api/audit/start' && method === 'POST') {
       const body = (await request.json().catch(() => ({}))) as {
