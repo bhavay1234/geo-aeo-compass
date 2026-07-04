@@ -84,6 +84,12 @@ function jaccard(a: string, b: string): number {
 
 const TRANSACTIONAL_INTENTS = new Set(['transactional', 'commercial']);
 
+// Keywords that mark job-seeker / support / navigational noise the Labs
+// suggestions sometimes carry (live example: "hsbc global trade solutions
+// internship") — never buyer queries.
+const JUNK_WORDS =
+  /\b(internship|intern|jobs?|careers?|salary|salaries|hiring|login|log in|sign ?in|sign ?up|support|help ?desk|tutorial|course|certification|resume|cv)\b/i;
+
 /**
  * Merge per-seed suggestions into the 20 most relevant queries:
  * dedupe permutations, drop navigational + own-brand-only keywords, apply the
@@ -101,6 +107,7 @@ export function pickQueries(
   for (const s of suggestions) {
     const kw = s.keyword.toLowerCase();
     if (s.intent === 'navigational') continue;
+    if (JUNK_WORDS.test(kw)) continue;
     if (intentMode === 'transactional' && !TRANSACTIONAL_INTENTS.has(s.intent)) continue;
     // Own-brand keywords: keep comparisons ("brand vs x"), drop pure brand navs.
     if (brand && kw.includes(brand) && !/\bvs\b|\balternative/i.test(kw)) continue;
