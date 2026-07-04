@@ -287,6 +287,17 @@ export interface Audit {
   /** Which LLMs this audit polled — the denominator for cross-LLM signals
    *  (consensus per brand, universal citation sources). */
   llms_polled: LlmSource[];
+  /** Brand DNA captured at launch (Apify scrape → LLM synthesis): category,
+   *  positioning, seed_phrases, products, competitors, audience. */
+  brand_dna: {
+    brand_name?: string;
+    positioning?: string;
+    category?: string;
+    audience?: string;
+    products?: string[];
+    competitors?: string[];
+    seed_phrases?: string[];
+  } | null;
 }
 
 /** Distinguishes rows in poll_results (one poll per query per LLM). */

@@ -71,11 +71,13 @@ function Row({
   rank,
   llmCount,
   title,
+  query,
 }: {
   e: CitationAnalysisEntry;
   rank: number;
   llmCount: number;
   title: string;
+  query?: string;
 }) {
   const k = KIND[e.source_type] ?? KIND.other;
   const citingCount = (e.llms_citing ?? []).length || 1;
@@ -157,6 +159,11 @@ function Row({
             {e.query_count === 1 ? "y" : "ies"}
             {!e.brand_present && ` · ${hint(e.source_type)}`}
           </div>
+          {query && (
+            <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 2 }}>
+              ↳ answers: <span style={{ color: "var(--ink-2)" }}>{query}</span>
+            </div>
+          )}
         </div>
         <span
           className="tm-badge"
@@ -194,6 +201,69 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     }
     return m;
   }, [polls]);
+
+  // URL → the buyer queries that surfaced it (why this source matters).
+  const queriesByUrl = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const p of polls) {
+      for (const c of p.citations ?? []) {
+        if (!c.url) continue;
+        if (!m.has(c.url)) m.set(c.url, new Set());
+        m.get(c.url)!.add(p.query_text);
+      }
+    }
+    return m;
+  }, [polls]);
+  const queryFor = (url: string): string => {
+    const qs = Array.from(queriesByUrl.get(url) ?? []);
+    return qs.length === 0 ? "" : qs.length <= 2 ? qs.join(", ") : `${qs[0]} +${qs.length - 1} more`;
+  };
+
+  // Niche vocabulary RELATIVE TO THIS BRAND — drawn from its category, buyer
+  // queries, positioning, DNA (seeds/products), and its competitors. A listicle
+  // is on-niche if it shares this vocabulary. This is category-aware: for an HR
+  // brand, "best HR software" IS the niche and is kept; for a supply-chain brand
+  // it isn't. No universal blocklist — relevance is always relative to the brand.
+  const nicheTerms = useMemo(() => {
+    const STOP = new Set([
+      "best", "top", "software", "tools", "tool", "platform", "platforms", "solution",
+      "solutions", "app", "apps", "vendor", "vendors", "companies", "company", "list",
+      "guide", "review", "reviews", "comparison", "alternative", "alternatives", "free",
+      "online", "services", "service", "systems", "system", "with", "your", "the", "for",
+      "and", "vs", "versus", "using", "based", "leading", "modern", "global", "world",
+      "business", "businesses", "enterprise", "management", "data",
+    ]);
+    const terms = new Set<string>();
+    const add = (s?: string | null) => {
+      for (const w of (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/)) {
+        if (w.length > 3 && !STOP.has(w)) terms.add(w);
+      }
+    };
+    add(audit.category);
+    add(audit.positioning);
+    add(audit.brand_name);
+    for (const p of polls) add(p.query_text);
+    for (const c of audit.competitors ?? []) add(c);
+    const dna = audit.brand_dna as {
+      category?: string; positioning?: string; audience?: string;
+      seed_phrases?: string[]; products?: string[]; competitors?: string[];
+    } | null;
+    if (dna) {
+      add(dna.category);
+      add(dna.positioning);
+      add(dna.audience);
+      for (const s of dna.seed_phrases ?? []) add(s);
+      for (const s of dna.products ?? []) add(s);
+      for (const s of dna.competitors ?? []) add(s);
+    }
+    return terms;
+  }, [audit, polls]);
+  const isNicheRelevant = (e: CitationAnalysisEntry): boolean => {
+    if (nicheTerms.size < 3) return true; // too little vocabulary to judge — keep
+    const hay = `${titleByUrl.get(e.url) ?? ""} ${e.resolved_url || e.url}`.toLowerCase();
+    for (const t of nicheTerms) if (hay.includes(t)) return true;
+    return false;
+  };
 
   const recentlyCompleted =
     !!audit.completed_at &&
@@ -260,10 +330,13 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   };
 
   const actionableRaw = groups.filter((g) => ACTIONABLE.has(g.key));
-  // Deep pages only, and recount.
+  // Keep DEEP pages only; for listicles, also require niche relevance (drop the
+  // vague off-topic roundups). Recount after filtering.
+  const keepActionable = (g: (typeof groups)[number], e: CitationAnalysisEntry) =>
+    !isHomepage(e) && (g.key !== "listicles" || isNicheRelevant(e));
   const actionableGroups = actionableRaw
     .map((g) => {
-      const entries = g.entries.filter((e) => !isHomepage(e));
+      const entries = g.entries.filter((e) => keepActionable(g, e));
       return {
         ...g,
         entries,
@@ -276,6 +349,9 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     (n, g) => n + g.entries.filter(isHomepage).length,
     0
   );
+  const offNicheHidden = actionableRaw
+    .filter((g) => g.key === "listicles")
+    .reduce((n, g) => n + g.entries.filter((e) => !isHomepage(e) && !isNicheRelevant(e)).length, 0);
   const landscapeGroups = groups.filter((g) => !ACTIONABLE.has(g.key));
   const actionableMissing = actionableGroups.reduce((n, g) => n + g.missing, 0);
 
@@ -310,6 +386,26 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   const ownDomainCited = visibleEntries.filter(
     (e) => e.source_type === "own" || normalizeDomain(e.domain) === ownNorm
   ).length;
+  // Graded own-site score (0–100): own pages cited weigh most; breadth of being
+  // named across sources is secondary.
+  const namedRate = totalVisible ? present.length / totalVisible : 0;
+  const ownScore = Math.min(
+    100,
+    Math.round(ownDomainCited * 30 + Math.min(present.length, 8) * 5 + namedRate * 60)
+  );
+  const ownGrade = ownScore >= 60 ? "Strong" : ownScore >= 25 ? "Moderate" : "Weak";
+  const ownGradeColor =
+    ownScore >= 60 ? "var(--pos)" : ownScore >= 25 ? "var(--warn)" : "var(--hot)";
+
+  // Universal blind spots — cited by ALL polled LLMs but missing you. Highest ROI
+  // (every engine agrees this source matters). Get-listable surfaces only.
+  const universalTargets = actionableGroups
+    .flatMap((g) => g.entries.map((e) => ({ e, label: g.label })))
+    .filter(
+      ({ e }) => !e.brand_present && (e.llms_citing?.length ?? 0) >= polledLlms.length && polledLlms.length > 1
+    )
+    .sort((a, b) => b.e.query_count - a.e.query_count)
+    .slice(0, 6);
 
   // Landscape rolled up by DOMAIN — hundreds of vendor/competitor homepage rows
   // are noise; the useful view is "which rival/vendor domains do the LLMs cite,
@@ -374,7 +470,14 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         {open && (
           <div className="tm-rows">
             {g.entries.map((e, i) => (
-              <Row key={e.url} e={e} rank={i + 1} llmCount={llmCount} title={titleByUrl.get(e.url) ?? ""} />
+              <Row
+                key={e.url}
+                e={e}
+                rank={i + 1}
+                llmCount={llmCount}
+                title={titleByUrl.get(e.url) ?? ""}
+                query={queryFor(e.url)}
+              />
             ))}
           </div>
         )}
@@ -452,22 +555,32 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
             background: ownDomainCited > 0 ? "var(--pos-bg)" : "var(--hot-bg)",
           }}
         >
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+          <div
+            style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}
+          >
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+              ◆ Own-site signal
+            </span>
+            <span style={{ fontSize: 15, fontWeight: 800, color: ownGradeColor }}>
+              {ownGrade}
+            </span>
+            <span className="mono" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+              {ownScore}/100
+            </span>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 4 }}>
             {ownDomainCited > 0 ? (
               <>
-                ◆ Own-site signal: strong — the LLMs cite{" "}
-                <b>{ownDomainCited}</b> page{ownDomainCited === 1 ? "" : "s"} on your
-                own domain directly.
+                LLMs cite <b>{ownDomainCited}</b> page{ownDomainCited === 1 ? "" : "s"} on
+                your own domain
               </>
             ) : (
-              <>⚠ Own-site signal: weak — none of your own pages are cited by the LLMs.</>
-            )}
-          </div>
-          <div style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 3 }}>
-            You're named on {present.length} of {totalVisible} cited sources.{" "}
+              <>None of your own pages are cited</>
+            )}{" "}
+            · you're named on <b>{present.length}</b> of {totalVisible} sources.{" "}
             {ownDomainCited > 0
               ? "Keep those pages authoritative; then close the get-listed gaps below."
-              : "Publish authoritative pages the LLMs will cite, and get onto the third-party sources below."}
+              : "Publish authoritative pages the LLMs will cite, and get onto the sources below."}
           </div>
         </div>
       </div>
@@ -512,15 +625,42 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         </div>
       )}
 
+      {/* ── UNIVERSAL BLIND SPOTS ── every LLM cites it, you're missing. Top ROI. */}
+      {universalTargets.length > 0 && (
+        <>
+          <div className="tm-phead" style={{ borderTop: "none", background: "var(--hot-bg)" }}>
+            <h2 style={{ color: "var(--hot)" }}>🎯 Universal blind spots</h2>
+            <span className="meta">
+              cited by all {polledLlms.length} LLMs but missing you — land these first
+            </span>
+          </div>
+          <div className="tm-rows">
+            {universalTargets.map(({ e, label }, i) => (
+              <Row
+                key={e.url}
+                e={e}
+                rank={i + 1}
+                llmCount={llmCount}
+                title={`${titleByUrl.get(e.url) || e.domain}  ·  ${label}`}
+                query={queryFor(e.url)}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
       {/* ── WHERE TO GET LISTED ── the actionable worklist (deep pages only). */}
-      <div className="tm-phead" style={{ borderTop: "none" }}>
+      <div className="tm-phead" style={universalTargets.length > 0 ? undefined : { borderTop: "none" }}>
         <h2 style={{ color: "var(--hot)" }}>⚑ Where to get listed</h2>
         <span className="meta">
           {actionableMissing} third-party page{actionableMissing === 1 ? "" : "s"} you're
           missing · highest-leverage first
           {homepagesHidden > 0 && ` · ${homepagesHidden} homepage${
             homepagesHidden === 1 ? "" : "s"
-          } hidden (low signal)`}
+          } hidden`}
+          {offNicheHidden > 0 && ` · ${offNicheHidden} off-topic listicle${
+            offNicheHidden === 1 ? "" : "s"
+          } hidden`}
         </span>
       </div>
 
@@ -535,6 +675,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
               title={`${titleByUrl.get(e.url) || e.domain}  ·  ${label}${
                 ACTION[key] ? ` → ${ACTION[key]}` : ""
               }`}
+              query={queryFor(e.url)}
             />
           ))}
         </div>
