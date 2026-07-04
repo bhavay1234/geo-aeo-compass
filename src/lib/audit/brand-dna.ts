@@ -39,19 +39,15 @@ export interface DnaResult {
   query_source: 'labs' | 'llm';
 }
 
+// DFS caps BOTH user_prompt and system_message at ~500 chars (live-verified:
+// longer values fail with "Invalid Field"). Keep this under 460.
 const DNA_SYSTEM =
-  'You distill a company website into its Brand DNA. Given scraped page ' +
-  'content, return ONLY valid JSON (no markdown, no prose, no refusals). If ' +
-  'the scraped content is thin, empty, or unreadable, use your own knowledge ' +
-  'of the company at the given domain instead — ALWAYS return the JSON. ' +
-  'Schema: {"brand_name": string, ' +
-  '"positioning": string (one sentence: who it serves + what it does + wedge), ' +
-  '"category": string (2-4 word product category buyers would search), ' +
-  '"products": string[] (up to 4 named products/modules), ' +
-  '"audience": string (one short phrase), ' +
-  '"seed_phrases": string[] (exactly 5 generic search phrases buyers in this ' +
-  "category would type — category and problem terms, NEVER the brand's own " +
-  'name, e.g. "freight tracking software", "best crm for small business")}';
+  'Distill the company at the given domain into Brand DNA. Use the scraped ' +
+  'content if useful, else your own knowledge of the company. Never refuse. ' +
+  'Return ONLY valid JSON: {"brand_name":string,"positioning":string one ' +
+  'sentence,"category":string 2-4 word buyer category,"products":string[] up ' +
+  'to 4,"audience":string short phrase,"seed_phrases":string[] exactly 5 ' +
+  'generic buyer search phrases for this category, never the brand name}';
 
 /** Scrape the homepage — Apify cheerio primary (per config), plain fetch fallback. */
 async function scrapeHomepage(domain: string, env: Env): Promise<ExtractedPage | null> {
@@ -196,12 +192,12 @@ export async function buildBrandDna(
   if (queries.length < 5) {
     source = 'llm';
     const gen = (await dfsLlmJson(
-      'Return ONLY valid JSON: {"queries": string[]} — exactly 20 search ' +
+      'Return ONLY valid JSON {"queries":string[]} with exactly 20 search ' +
         'queries buyers in this category would ask an AI assistant. ' +
         (intentMode === 'transactional'
-          ? 'ALL must have transactional/commercial intent (best X, X vs Y, top X, X pricing).'
-          : 'Mix of commercial and informational intent.') +
-        ' Never include the brand name except in comparison queries. Avoid year references.',
+          ? 'All transactional/commercial intent (best X, X vs Y, top X, X pricing).'
+          : 'Mix commercial and informational.') +
+        ' No brand names except comparisons. No year references.',
       // Compact — DFS user_prompt cap (~500 chars).
       `Company: ${dna.brand_name} (${dna.domain}). Category: ${dna.category || 'unknown'}. Positioning: ${dna.positioning.slice(0, 200)}`.slice(0, 460),
       env

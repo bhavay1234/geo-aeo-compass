@@ -132,9 +132,12 @@ export async function dfsLlmJson(
       '/ai_optimization/chat_gpt/llm_responses/live',
       [
         {
-          user_prompt: userPrompt,
+          // DFS rejects user_prompt/system_message over ~500 chars
+          // ("Invalid Field") — hard-slice as a safety net; prompts are
+          // designed to fit.
+          user_prompt: userPrompt.slice(0, 490),
           model_name: 'gpt-4o',
-          system_message: systemMessage,
+          system_message: systemMessage.slice(0, 490),
           web_search: false,
           temperature: 0.2,
         },
