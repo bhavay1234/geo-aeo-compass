@@ -190,6 +190,42 @@ export function brandMatches(a: string, b: string): boolean {
   );
 }
 
+/**
+ * Merge product-variant brand names to ONE canonical (the shortest/parent form),
+ * so "Descartes MacroPoint" and "Descartes" collapse to "Descartes" instead of
+ * double-counting as two competitors. Returns lowercased-name → canonical
+ * display. Uses the same word-boundary variant rule as brandMatches.
+ */
+export function buildBrandCanonicalizer(names: string[]): Map<string, string> {
+  const uniq = Array.from(
+    new Set(names.map((n) => (n || "").trim()).filter(Boolean))
+  ).sort((a, b) => a.length - b.length); // shortest first → parents win
+  const reps: string[] = [];
+  for (const nm of uniq) if (!reps.some((r) => brandMatches(r, nm))) reps.push(nm);
+  const map = new Map<string, string>();
+  for (const nm of uniq) {
+    const rep = reps.find((r) => brandMatches(r, nm)) ?? nm;
+    map.set(nm.toLowerCase(), rep);
+  }
+  return map;
+}
+
+/** Collapse a list of brand names, merging product variants to their parent. */
+export function dedupeBrandVariants(names: string[]): string[] {
+  const canon = buildBrandCanonicalizer(names);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const nm of names) {
+    const rep = canon.get((nm || "").trim().toLowerCase());
+    if (!rep) continue;
+    const k = rep.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(rep);
+  }
+  return out;
+}
+
 export function recommendedBrands(p: PollResult, ownName: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -288,7 +324,9 @@ export function allCompetitorBrands(audit: Audit, polls: PollResult[]): string[]
         out.push(c.name);
       }
     }
-    return out;
+    // Collapse product variants ("Descartes MacroPoint" → "Descartes") the LLM
+    // classifier may have missed — never list the same competitor twice.
+    return dedupeBrandVariants(out);
   }
   // Fallback (OpenAI-off / pre-classifier audits): recurrence >= 2 distinct
   // queries; tracked competitors always count.
@@ -441,6 +479,15 @@ export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry
   };
 
   const groups = groupPollsByQuery(polls);
+  // Canonicalize brand variants across the WHOLE audit first, so "Descartes
+  // MacroPoint" and "Descartes" count as one competitor everywhere.
+  const allNames: string[] = [...(audit.competitors ?? [])];
+  for (const [, group] of groups)
+    for (const p of group)
+      for (const nm of recommendedBrands(p, audit.brand_name)) allNames.push(nm);
+  const canon = buildBrandCanonicalizer(allNames);
+  const canonOf = (nm: string) => canon.get((nm || "").trim().toLowerCase()) ?? nm.trim();
+
   for (const [, group] of groups) {
     const youCited = group.some((p) => p.brand_cited);
     if (youCited) bump("__you__", audit.brand_name, audit.domain, true);
@@ -449,8 +496,9 @@ export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry
     const perQueryBrands = new Map<string, string>();
     for (const p of group) {
       for (const nm of recommendedBrands(p, audit.brand_name)) {
-        const k = nm.toLowerCase();
-        if (!perQueryBrands.has(k)) perQueryBrands.set(k, nm);
+        const c = canonOf(nm);
+        const k = c.toLowerCase();
+        if (!perQueryBrands.has(k)) perQueryBrands.set(k, c);
       }
     }
     for (const [, nm] of perQueryBrands) {
