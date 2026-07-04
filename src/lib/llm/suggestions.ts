@@ -342,6 +342,83 @@ export async function generateQuerySuggestion(
   }
 }
 
+const CLASSIFY_SYSTEM =
+  'You are given an AUDITED brand (name, category, positioning) and a list of ' +
+  'BRAND NAMES that AI assistants surfaced when answering buyer queries in this ' +
+  'space. Decide which are GENUINE competitors — a product a buyer could ' +
+  'realistically choose INSTEAD of the audited brand — judged by INTENT and ' +
+  'FEATURES, not by how often the name appeared. Rules:\n' +
+  '1. CONSOLIDATE product variants of the same company to ONE parent brand ' +
+  '("Oracle Transportation Management", "Oracle SCM Cloud" → "Oracle"; ' +
+  '"Descartes MacroPoint" → "Descartes"). Never return two entries for one company.\n' +
+  '2. tier "direct" = same core category / overlapping features. tier ' +
+  '"adjacent" = a neighboring category a buyer might cross-shop (e.g. a pure TMS ' +
+  'or a broad SCM/ERP suite when the audited brand is a visibility platform).\n' +
+  '3. DROP non-competitors: generic BI/analytics/spreadsheet tools (Tableau, ' +
+  'Power BI, Qlik, Excel, SAS), accounting-only software (Sage), freight carriers ' +
+  'or 3PLs that are not software products (Schneider), and anything outside this ' +
+  'software space. When unsure whether something is a real product rival, DROP it.\n' +
+  'Return ONLY JSON: {"competitors":[{"name":string,"tier":"direct"|"adjacent"}]}.';
+
+/**
+ * Map discovered brand names to genuine same-category competitors by intent +
+ * features — ONE gpt-4o-mini call. Consolidates variants, drops wrong-category
+ * noise. Returns [] on no key / failure so the caller falls back to the
+ * recurrence heuristic. This is the judgment that replaces the ">= 2 queries"
+ * gate: a real rival named once survives; a one-off BI tool does not.
+ */
+export async function classifyCompetitors(
+  input: {
+    brandName: string;
+    category: string;
+    positioning: string;
+    candidates: string[];
+  },
+  env: Env
+): Promise<Array<{ name: string; tier: 'direct' | 'adjacent' }>> {
+  if (!env.OPENAI_API_KEY || input.candidates.length === 0) return [];
+  const user = JSON.stringify({
+    audited_brand: input.brandName,
+    category: input.category || '(unknown)',
+    positioning: input.positioning.slice(0, 300),
+    brand_names: input.candidates.slice(0, 80),
+  });
+  try {
+    const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+    const completion = await withTimeout(
+      openai.chat.completions.create({
+        model: MODEL,
+        temperature: 0.1,
+        max_tokens: 700,
+        messages: [
+          { role: 'system', content: CLASSIFY_SYSTEM },
+          { role: 'user', content: user },
+        ],
+      }),
+      15000
+    );
+    const parsed = JSON.parse(
+      stripFences(completion.choices[0]?.message?.content || '')
+    ) as { competitors?: unknown };
+    if (!Array.isArray(parsed.competitors)) return [];
+    const seen = new Set<string>();
+    const out: Array<{ name: string; tier: 'direct' | 'adjacent' }> = [];
+    for (const c of parsed.competitors as unknown[]) {
+      const o = c as { name?: unknown; tier?: unknown };
+      const name = typeof o.name === 'string' ? o.name.trim() : '';
+      if (!name) continue;
+      const k = name.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ name, tier: o.tier === 'adjacent' ? 'adjacent' : 'direct' });
+    }
+    return out;
+  } catch (err: any) {
+    console.error('[classify-competitors] failed:', err?.message);
+    return [];
+  }
+}
+
 /**
  * Pick the final buyer queries for a Brand-DNA audit from DataForSEO Labs
  * candidates, with real judgment — DROPs off-category keywords that merely

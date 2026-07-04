@@ -128,6 +128,23 @@ function ProfileCard({
             Discovered
           </span>
         )}
+        {p.category_tier && (
+          <span
+            className="tm-tier"
+            style={
+              p.category_tier === "direct"
+                ? { background: "var(--hot-bg)", color: "var(--hot)" }
+                : { background: "var(--warn-bg)", color: "var(--warn)" }
+            }
+            title={
+              p.category_tier === "direct"
+                ? "Direct rival — same category, overlapping features"
+                : "Adjacent — a neighboring category buyers cross-shop"
+            }
+          >
+            {p.category_tier === "direct" ? "Direct" : "Adjacent"}
+          </span>
+        )}
         {!p.isYou && p.consensus.llmsNaming.length > 0 && llmDenom > 1 && (
           <span
             className="tm-tier"

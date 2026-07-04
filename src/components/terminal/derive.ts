@@ -96,6 +96,23 @@ export function competitorDomainsInPoll(p: PollResult): Set<string> {
  * (competitors_cited) + the LLM-extracted brands_named. NOT cited domains —
  * those are sources, tagged separately via tagSource.
  */
+/** Brand-name match tolerant of product variants: "Oracle" ~ "Oracle
+ *  Transportation Management", "Descartes" ~ "Descartes MacroPoint". Word-
+ *  boundary prefix/suffix only (not loose substring) to avoid "ori" ~ "category".
+ *  Lets a consolidated parent brand aggregate its variant mentions. */
+export function brandMatches(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (!x || !y) return false;
+  if (x === y) return true;
+  return (
+    x.startsWith(y + " ") ||
+    y.startsWith(x + " ") ||
+    x.endsWith(" " + y) ||
+    y.endsWith(" " + x)
+  );
+}
+
 export function recommendedBrands(p: PollResult, ownName: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -180,6 +197,24 @@ export function influenceRollup(
  *  tracked competitors always count; discovered ones need >= 2 distinct queries
  *  (recurrence) to count, so a single-mention long-tail doesn't inflate it. */
 export function allCompetitorBrands(audit: Audit, polls: PollResult[]): string[] {
+  // Preferred: the intent+feature classification (tracked competitors + the
+  // classified rivals, already consolidated) — no recurrence gate, so real
+  // one-mention rivals are kept and wrong-category noise is already dropped.
+  const classified = audit.insights?.competitor_brands ?? [];
+  if (classified.length > 0) {
+    const out = [...(audit.competitors ?? [])];
+    const seen = new Set(out.map((n) => n.toLowerCase()));
+    for (const c of classified) {
+      const k = c.name.toLowerCase();
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(c.name);
+      }
+    }
+    return out;
+  }
+  // Fallback (OpenAI-off / pre-classifier audits): recurrence >= 2 distinct
+  // queries; tracked competitors always count.
   const namedLower = new Set(
     (audit.competitors ?? []).map((c) => c.trim().toLowerCase()).filter(Boolean)
   );
@@ -433,7 +468,6 @@ export function brandConsensus(
   polls: PollResult[],
   brandName: string
 ): BrandConsensus {
-  const bl = brandName.trim().toLowerCase();
   const llms = llmsPolled(audit);
   const groups = groupPollsByQuery(polls);
   const byLlm = Object.fromEntries(llms.map((l) => [l, 0])) as Record<LlmSource, number>;
@@ -444,8 +478,8 @@ export function brandConsensus(
     let namedThisQuery = false;
     const seenLlms = new Set<LlmSource>();
     for (const p of group) {
-      const named = recommendedBrands(p, audit.brand_name).some(
-        (n) => n.toLowerCase() === bl
+      const named = recommendedBrands(p, audit.brand_name).some((n) =>
+        brandMatches(n, brandName)
       );
       if (!named) continue;
       const llm = normalizeLlm(p.llm_source);
@@ -482,6 +516,9 @@ export interface CompetitorProfile {
   discovered: boolean;
   sovPct: number;
   tier: 1 | 2 | 3;
+  /** Same-category classification from intent+features judgment, when available:
+   *  'direct' rival vs 'adjacent' cross-shopped neighbor. undefined = you / not classified. */
+  category_tier?: "direct" | "adjacent";
   verdict: string;
   strengths: string[];
   beatsYou: string[];
@@ -504,8 +541,9 @@ function pollRecommends(
   ownName: string
 ): boolean {
   if (isYou) return p.brand_cited;
-  const nl = name.toLowerCase();
-  return recommendedBrands(p, ownName).some((b) => b.toLowerCase() === nl);
+  // Fuzzy so a consolidated parent brand ("Oracle") aggregates its variant
+  // mentions ("Oracle Transportation Management") into one profile.
+  return recommendedBrands(p, ownName).some((b) => brandMatches(b, name));
 }
 
 /**
@@ -536,10 +574,15 @@ export function buildCompetitorProfiles(
     for (const dom of competitorDomainsInPoll(p)) competitorJudged.add(dom);
   }
 
-  // Competitor BRANDS named in the run, tracking the DISTINCT QUERIES each was
-  // named in. A real rival recurs across queries; a one-off mention is noise —
-  // so discovered competitors need >= 2 distinct queries to surface (named/
-  // tracked competitors always show). This is what tames the "199 brands" list.
+  // Discovered competitor BRANDS. Preferred: the intent+feature classification
+  // (audit.insights.competitor_brands) — genuine same-category rivals judged by
+  // what they ARE, consolidated to parent brand, wrong-category noise already
+  // dropped; a real rival named in ONE query still surfaces. Fallback for
+  // OpenAI-off / pre-classifier audits: recurrence >= 2 distinct queries.
+  const classified = audit.insights?.competitor_brands ?? [];
+  const tierByKey = new Map<string, "direct" | "adjacent">();
+  for (const c of classified) tierByKey.set(c.name.toLowerCase(), c.tier);
+
   const recAll = new Map<string, { display: string; queries: Set<string> }>();
   for (const p of polls) {
     for (const nm of recommendedBrands(p, audit.brand_name)) {
@@ -568,9 +611,14 @@ export function buildCompetitorProfiles(
   }
 
   type Entity = { name: string; domain: string | null; isYou: boolean; discovered: boolean };
-  const discoveredBrands = Array.from(recAll.entries())
-    .filter(([k, v]) => !namedLower.has(k) && v.queries.size >= DISCOVERED_MIN_QUERIES)
-    .map(([, v]) => v.display);
+  const discoveredBrands =
+    classified.length > 0
+      ? classified
+          .filter((c) => !namedLower.has(c.name.toLowerCase()))
+          .map((c) => c.name)
+      : Array.from(recAll.entries())
+          .filter(([k, v]) => !namedLower.has(k) && v.queries.size >= DISCOVERED_MIN_QUERIES)
+          .map(([, v]) => v.display);
   const entities: Entity[] = [
     { name: audit.brand_name, domain: audit.domain, isYou: true, discovered: false },
     ...(audit.competitors ?? []).map((n) => ({
@@ -636,9 +684,15 @@ export function buildCompetitorProfiles(
       .sort((a, b) => b.count - a.count)
       .slice(0, 5);
 
+    // SoV entries are variant-level; a consolidated parent may not key exactly,
+    // so fall back to summing the share of every matching variant.
     const sovPct = e.isYou
       ? sovByKey.get("__you__") ?? 0
-      : sovByKey.get(e.name.toLowerCase()) ?? (dn ? sovByKey.get(dn) ?? 0 : 0);
+      : sovByKey.get(e.name.toLowerCase()) ??
+        (dn ? sovByKey.get(dn) : undefined) ??
+        sov
+          .filter((s) => !s.isYou && brandMatches(s.name, e.name))
+          .reduce((a, s) => a + s.pct, 0);
     const verdict = e.isYou
       ? audit.brand_verdict ?? ""
       : verdictByKey.get(e.name.toLowerCase()) ?? (dn ? verdictByKey.get(dn) ?? "" : "");
@@ -654,6 +708,7 @@ export function buildCompetitorProfiles(
       discovered: e.discovered,
       sovPct,
       tier: tierForPct(sovPct),
+      category_tier: e.isYou ? undefined : tierByKey.get(e.name.toLowerCase()),
       verdict,
       strengths,
       beatsYou,

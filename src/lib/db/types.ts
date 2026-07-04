@@ -222,6 +222,19 @@ export interface AuditInsights {
   named_competitor_count: number;
   // How many DISCOVERED (unnamed) domains the LLM labeled 'competitor'.
   discovered_competitor_count: number;
+  // Discovered rivals judged genuine same-category competitors by intent +
+  // features (OpenAI), consolidated to parent brand. Replaces the blunt
+  // recurrence gate — a real rival named in ONE query still surfaces, while
+  // wrong-category noise (BI tools, carriers) is dropped. Absent on old audits.
+  competitor_brands?: ClassifiedCompetitor[];
+}
+
+/** A discovered brand the classifier judged a real competitor of the audited
+ *  brand. tier: 'direct' = same core category · 'adjacent' = cross-shopped
+ *  neighbor (e.g. a TMS or broad SCM suite for a visibility platform). */
+export interface ClassifiedCompetitor {
+  name: string;
+  tier: 'direct' | 'adjacent';
 }
 
 export interface AuditSummary {

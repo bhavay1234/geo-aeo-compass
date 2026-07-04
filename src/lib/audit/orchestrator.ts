@@ -7,6 +7,7 @@ import {
   inferPositioning,
   generateQuerySuggestion,
   inferBrandVerdict,
+  classifyCompetitors,
 } from '../llm/suggestions';
 import { getSupabaseAdmin, type Env } from '../db/supabase';
 import type {
@@ -746,6 +747,21 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       .filter(([k]) => !namedLower.has(k))
       .map(([, nm]) => nm);
 
+    // Judge which discovered brands are GENUINE same-category rivals by intent +
+    // features (not by mention count) — consolidates variants, drops off-category
+    // noise. This replaces the ">= 2 queries" recurrence gate applied downstream:
+    // a real rival named once survives, a one-off BI tool doesn't. Empty on
+    // OpenAI-off / failure, in which case the UI keeps its recurrence fallback.
+    const classifiedCompetitors = await classifyCompetitors(
+      {
+        brandName,
+        category: category || audit.category || '',
+        positioning: positioning ?? '',
+        candidates: discoveredBrands,
+      },
+      env
+    );
+
     // 6) Recompute insights/summary with the corrected competitor count, then
     //    persist in THREE staged writes so a missing/unmigrated column can't
     //    cascade-drop the others (the cause of empty competitors/verdicts):
@@ -755,7 +771,9 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
     //    Verdicts are also the slowest (N mini-calls), so writing the core
     //    first means competitor data lands even if verdicts are slow or fail.
     const insights = await computeInsights(auditId, env);
-    insights.discovered_competitor_count = discoveredBrands.length;
+    if (classifiedCompetitors.length > 0) insights.competitor_brands = classifiedCompetitors;
+    insights.discovered_competitor_count =
+      classifiedCompetitors.length || discoveredBrands.length;
     const summary = await computeSummary(auditId, brandName, namedCompetitors, env);
     summary.headline = buildInsightHeadline(summary, insights);
 
