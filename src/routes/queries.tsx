@@ -245,9 +245,10 @@ interface QueryGroup {
   polls: Map<LlmSource, PollResult>;
 }
 
-/** Honest methodology note — sets buyer expectations so any gap vs the client's
- *  own personalized ChatGPT reads as expected, not a bug. */
-function MethodologyNote() {
+/** Honest methodology note — pre-empts the "but I see a different answer in the
+ *  chat UI" objection by framing the report as an AGGREGATE, API-based
+ *  measurement (many queries) vs a single volatile UI sample. */
+function MethodologyNote({ queryCount }: { queryCount: number }) {
   const [open, setOpen] = useState(false);
   return (
     <div
@@ -276,26 +277,29 @@ function MethodologyNote() {
           textTransform: "uppercase",
         }}
       >
-        {open ? "▾" : "▸"} How this is measured
+        {open ? "▾" : "▸"} Measured via official APIs, aggregated across{" "}
+        {queryCount} {queryCount === 1 ? "query" : "queries"} — a one-off chat-UI
+        check may differ (that's expected)
       </button>
       {open && (
         <div style={{ marginTop: 8 }}>
-          These results come from the <strong>official APIs</strong> — ChatGPT via
-          OpenAI, Perplexity and Gemini via DataForSEO — run in a{" "}
-          <strong>cold, no-login session (US region)</strong>, i.e. what a{" "}
-          <strong>fresh buyer</strong> sees, not your personalized account.
+          We query ChatGPT (OpenAI), Perplexity, and Gemini through their{" "}
+          <strong>official APIs</strong>, running <strong>{queryCount}</strong>{" "}
+          buyer {queryCount === 1 ? "query" : "queries"} in a{" "}
+          <strong>cold, no-login session</strong> and aggregating the results —
+          what a <strong>fresh buyer</strong> sees, not a personalized account.
           <br />
           <br />
-          AI answers are <strong>non-deterministic</strong>: if you run the same
-          query on your own device you may get a different result — your ChatGPT
-          has memory/history, and answers shift by account, session, region, and
-          time. <em>That's expected, not an error in this report.</em>
+          If you check the same question in the chat app and see a different
+          answer, that's <strong>expected</strong>, not a discrepancy in this
+          report. AI answers are <strong>non-deterministic and personalized</strong>{" "}
+          — they shift by account memory, session, region, A/B tests, and time. A
+          single UI answer is one <em>volatile sample</em>.
           <br />
           <br />
-          Want to confirm what <strong>your device</strong> shows? Our browser
-          extension <em>(optional, coming soon)</em> re-runs these queries in your
-          own <strong>logged-out</strong> browser and shows them side-by-side with
-          this report — so you can verify the match yourself.
+          This report deliberately measures the <strong>pattern across many
+          queries</strong> (how often you're cited, and where the models source
+          their answers) — which is the reliable signal, not any one screenshot.
         </div>
       )}
     </div>
@@ -370,7 +374,7 @@ function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
 
   return (
     <div>
-      <MethodologyNote />
+      <MethodologyNote queryCount={counts.all} />
       <div className="tm-toolbar">
         <button className={segClass("all")} onClick={() => setFilter("all")}>
           All <span className="n">{counts.all}</span>
