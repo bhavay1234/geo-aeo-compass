@@ -178,6 +178,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   const polledLlms = llmsPolled(audit);
   const [openKey, setOpenKey] = useState<CitationCategory | null>(null);
   const [llmFilter, setLlmFilter] = useState<LlmSource | "all">("all");
+  const [landscapeOpen, setLandscapeOpen] = useState(false);
 
   // URL → page title, mined from the raw poll citations (citation_analysis
   // stores the URL but not the title). First non-empty title for a URL wins.
@@ -246,25 +247,97 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     "linkedin",
     "community",
   ]);
-  const actionableGroups = groups.filter((g) => ACTIONABLE.has(g.key));
+  // A bare homepage citation ("ibm.com is cited") is low signal — you can't get
+  // "listed" on a homepage, and it names no specific page to target. Drop these
+  // from the worklist; the signal lives in cited DEEP pages (articles, directory
+  // category pages, roundups).
+  const isHomepage = (e: CitationAnalysisEntry): boolean => {
+    try {
+      return new URL(e.resolved_url || e.url).pathname.replace(/\/+$/, "") === "";
+    } catch {
+      return false;
+    }
+  };
+
+  const actionableRaw = groups.filter((g) => ACTIONABLE.has(g.key));
+  // Deep pages only, and recount.
+  const actionableGroups = actionableRaw
+    .map((g) => {
+      const entries = g.entries.filter((e) => !isHomepage(e));
+      return {
+        ...g,
+        entries,
+        total: entries.length,
+        missing: entries.filter((e) => !e.brand_present).length,
+      };
+    })
+    .filter((g) => g.total > 0);
+  const homepagesHidden = actionableRaw.reduce(
+    (n, g) => n + g.entries.filter(isHomepage).length,
+    0
+  );
   const landscapeGroups = groups.filter((g) => !ACTIONABLE.has(g.key));
   const actionableMissing = actionableGroups.reduce((n, g) => n + g.missing, 0);
-  // The worklist: get-listable sources you're missing, ranked by cross-LLM
+
+  // What to actually DO with each get-listed surface.
+  const ACTION: Partial<Record<CitationCategory, string>> = {
+    reviews: "Get a profile & reviews",
+    listicles: "Pitch to be included",
+    editorial: "Earn a mention",
+    pr: "Distribute a release",
+    reddit: "Engage in the thread",
+    youtube: "Get featured",
+    linkedin: "Publish / get tagged",
+    community: "Contribute an answer",
+  };
+
+  // The worklist: get-listable DEEP pages you're missing, ranked by cross-LLM
   // leverage (cited by more LLMs / more queries = higher payoff to land).
   const topTargets = actionableGroups
-    .flatMap((g) => g.entries.filter((e) => !e.brand_present).map((e) => ({ e, label: g.label })))
+    .flatMap((g) =>
+      g.entries.filter((e) => !e.brand_present).map((e) => ({ e, key: g.key, label: g.label }))
+    )
     .sort(
       (a, b) =>
         (b.e.llms_citing?.length ?? 0) - (a.e.llms_citing?.length ?? 0) ||
         b.e.query_count - a.e.query_count
     )
     .slice(0, 8);
+
   // Own-site signal: pages on YOUR domain the LLMs cite directly (strongest AEO
   // proof), plus total sources that mention you.
   const ownNorm = normalizeDomain(audit.domain);
   const ownDomainCited = visibleEntries.filter(
     (e) => e.source_type === "own" || normalizeDomain(e.domain) === ownNorm
   ).length;
+
+  // Landscape rolled up by DOMAIN — hundreds of vendor/competitor homepage rows
+  // are noise; the useful view is "which rival/vendor domains do the LLMs cite,
+  // and how often". One row per domain.
+  const landscapeDomains = (() => {
+    const m = new Map<
+      string,
+      { domain: string; count: number; present: boolean; sampleUrl: string; label: string }
+    >();
+    for (const g of landscapeGroups)
+      for (const e of g.entries) {
+        const d = e.domain;
+        const ex = m.get(d);
+        if (ex) {
+          ex.count++;
+          ex.present = ex.present || e.brand_present;
+        } else {
+          m.set(d, {
+            domain: d,
+            count: 1,
+            present: e.brand_present,
+            sampleUrl: e.resolved_url || e.url,
+            label: g.label,
+          });
+        }
+      }
+    return Array.from(m.values()).sort((a, b) => b.count - a.count);
+  })();
 
   const groupSection = (g: (typeof groups)[number], muted: boolean) => {
     const open = openKey === g.key;
@@ -291,6 +364,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
             {g.label}
           </h2>
           <span className="meta">
+            {ACTION[g.key] && !muted ? `${ACTION[g.key]} · ` : ""}
             {g.total} source{g.total === 1 ? "" : "s"}
             {g.missing > 0 && (
               <span style={{ color: "var(--hot)" }}> · {g.missing} missing you</span>
@@ -438,24 +512,29 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         </div>
       )}
 
-      {/* ── WHERE TO GET LISTED ── the actionable worklist. */}
+      {/* ── WHERE TO GET LISTED ── the actionable worklist (deep pages only). */}
       <div className="tm-phead" style={{ borderTop: "none" }}>
         <h2 style={{ color: "var(--hot)" }}>⚑ Where to get listed</h2>
         <span className="meta">
-          {actionableMissing} third-party source{actionableMissing === 1 ? "" : "s"} you're
+          {actionableMissing} third-party page{actionableMissing === 1 ? "" : "s"} you're
           missing · highest-leverage first
+          {homepagesHidden > 0 && ` · ${homepagesHidden} homepage${
+            homepagesHidden === 1 ? "" : "s"
+          } hidden (low signal)`}
         </span>
       </div>
 
       {topTargets.length > 0 && (
         <div className="tm-rows">
-          {topTargets.map(({ e, label }, i) => (
+          {topTargets.map(({ e, key, label }, i) => (
             <Row
               key={e.url}
               e={e}
               rank={i + 1}
               llmCount={llmCount}
-              title={`${titleByUrl.get(e.url) || e.domain}  ·  ${label}`}
+              title={`${titleByUrl.get(e.url) || e.domain}  ·  ${label}${
+                ACTION[key] ? ` → ${ACTION[key]}` : ""
+              }`}
             />
           ))}
         </div>
@@ -466,16 +545,76 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         {actionableGroups.map((g) => groupSection(g, false))}
       </div>
 
-      {/* ── LANDSCAPE ── vendor + competitor sites: intel, not get-listable. */}
-      {landscapeGroups.length > 0 && (
+      {/* ── LANDSCAPE ── vendor + competitor DOMAINS (rolled up): intel only. */}
+      {landscapeDomains.length > 0 && (
         <>
-          <div className="tm-phead" style={{ background: "var(--panel-2)" }}>
-            <h2 style={{ color: "var(--ink-3)" }}>◱ Competitive landscape</h2>
+          <button
+            type="button"
+            onClick={() => setLandscapeOpen((v) => !v)}
+            className="tm-phead"
+            style={{
+              cursor: "pointer",
+              width: "100%",
+              border: "none",
+              background: "var(--panel-2)",
+              textAlign: "left",
+            }}
+            aria-expanded={landscapeOpen}
+          >
+            <h2 style={{ color: "var(--ink-3)" }}>
+              <span className="mono" style={{ marginRight: 8, fontSize: 13 }}>
+                {landscapeOpen ? "▾" : "▸"}
+              </span>
+              ◱ Competitive landscape
+            </h2>
             <span className="meta">
-              vendor & competitor sites — for intel, you can't list yourself here
+              {landscapeDomains.length} vendor & competitor domain
+              {landscapeDomains.length === 1 ? "" : "s"} — intel, not get-listable
             </span>
-          </div>
-          {landscapeGroups.map((g) => groupSection(g, true))}
+          </button>
+          {landscapeOpen && (
+            <div className="tm-rows">
+              {landscapeDomains.map((d, i) => (
+                <div key={d.domain} className="tm-card" style={{ position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span
+                      className="mono"
+                      style={{ fontSize: 12, color: "var(--ink-3)", width: 28 }}
+                    >
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    <a
+                      href={d.sampleUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        flex: 1,
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: "var(--ink)",
+                        textDecoration: "none",
+                      }}
+                    >
+                      {d.domain}
+                    </a>
+                    <span className="meta" style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
+                      {d.label} · {d.count} page{d.count === 1 ? "" : "s"} cited
+                    </span>
+                    <span
+                      className="tm-badge"
+                      style={
+                        d.present
+                          ? { background: "var(--pos-bg)", color: "var(--pos)" }
+                          : { background: "var(--panel-2)", color: "var(--ink-3)" }
+                      }
+                    >
+                      {d.present ? "You appear" : "—"}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
