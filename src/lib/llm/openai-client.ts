@@ -213,7 +213,8 @@ export async function pollChatGPT(
  */
 async function pollChatGPTWebSearch(
   query: string,
-  env: Env
+  env: Env,
+  model: string = WEBSEARCH_MODEL
 ): Promise<OpenAIPollResult> {
   const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
   const response = await pRetry(
@@ -221,7 +222,7 @@ async function pollChatGPTWebSearch(
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
       try {
         const call = (openai as any).responses.create({
-          model: WEBSEARCH_MODEL,
+          model,
           tools: [{ type: 'web_search_preview' }],
           instructions:
             'Answer the buyer question by SEARCHING THE WEB and citing specific, ' +
@@ -249,8 +250,29 @@ async function pollChatGPTWebSearch(
     response_text: parsed.text,
     citations: parsed.citations,
     raw_citations: parsed.raw_citations,
-    model_used: `${WEBSEARCH_MODEL} (web_search)`,
+    model_used: `${model} (web_search)`,
   };
+}
+
+/** TEMPORARY DIAGNOSTIC — does the account accept `model` on the Responses API
+ *  with web_search? Returns citation/text sizes or the API error. */
+export async function probeChatGPTModel(
+  query: string,
+  model: string,
+  env: Env
+): Promise<{ model: string; ok: boolean; citations: number; text_chars: number; error?: string }> {
+  if (!env.OPENAI_API_KEY) return { model, ok: false, citations: 0, text_chars: 0, error: 'no key' };
+  try {
+    const r = await pollChatGPTWebSearch(query, env, model);
+    return {
+      model,
+      ok: !!(r.response_text || r.citations.length),
+      citations: r.citations.length,
+      text_chars: r.response_text.length,
+    };
+  } catch (err: any) {
+    return { model, ok: false, citations: 0, text_chars: 0, error: String(err?.message).slice(0, 200) };
+  }
 }
 
 /** Extract answer text + url_citation annotations from a Responses API result. */
