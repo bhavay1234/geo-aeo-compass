@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from '../db/supabase';
+import { buildBrandDna } from '../audit/brand-dna';
 import { getEnv } from '../server/runtime';
 
 /**
@@ -35,6 +36,7 @@ export async function handleApiRoute(request: Request): Promise<Response> {
         category?: string;
         competitors?: string[];
         queries?: string[];
+        brand_dna?: unknown;
       };
 
       if (!body.brand_name?.trim()) return jsonError(400, 'brand_name is required');
@@ -90,6 +92,17 @@ export async function handleApiRoute(request: Request): Promise<Response> {
       }
 
       const auditId = audit.id as string;
+
+      // brand_dna persisted in an ISOLATED best-effort write — if migration
+      // 0012 hasn't been applied yet, audit creation must not break (the
+      // llms_polled lesson). Failure only loses the DNA display, not the run.
+      if (body.brand_dna) {
+        const { error: dnaErr } = await supabase
+          .from('audits')
+          .update({ brand_dna: body.brand_dna })
+          .eq('id', auditId);
+        if (dnaErr) console.error('[api] brand_dna write failed (non-fatal):', dnaErr.message);
+      }
 
       // Fan out to the queue — one message per (query × llm). Marked
       // query_category 'user' since these aren't from the generated bank.
@@ -171,6 +184,26 @@ export async function handleApiRoute(request: Request): Promise<Response> {
 
       if (auditRes.error || !auditRes.data) return jsonError(404, 'Audit not found');
       return Response.json({ audit: auditRes.data, polls: pollsRes.data || [] });
+    }
+
+    // Brand DNA: scrape the site (Apify), synthesize DNA + pick the 20 most
+    // relevant queries (DataForSEO Labs), honoring the caller's intent mode.
+    // Synchronous — the launcher shows an analyzing state (~30-70s).
+    if (path === '/api/dna' && method === 'POST') {
+      const body = (await request.json().catch(() => ({}))) as {
+        domain?: string;
+        intent?: string;
+      };
+      const domain = body.domain?.trim();
+      if (!domain) return jsonError(400, 'domain is required');
+      const intent = body.intent === 'transactional' ? 'transactional' : 'general';
+      try {
+        const result = await buildBrandDna(domain, intent, env);
+        return Response.json(result);
+      } catch (err: any) {
+        console.error('[api] dna failed:', err?.message);
+        return jsonError(502, err?.message || 'DNA analysis failed');
+      }
     }
 
     if (path === '/api/audits/recent' && method === 'GET') {

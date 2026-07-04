@@ -5,6 +5,7 @@ export interface StartAuditPayload {
   domain: string;
   competitors: string[];
   queries: string[];
+  brand_dna?: unknown;
 }
 
 export interface StartAuditResult {
@@ -30,6 +31,33 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error(message);
   }
   return (await res.json()) as T;
+}
+
+export interface DnaPayload {
+  domain: string;
+  intent: 'transactional' | 'general';
+}
+
+export interface DnaResponse {
+  dna: {
+    brand_name: string;
+    domain: string;
+    positioning: string;
+    category: string;
+    products: string[];
+    audience: string;
+    seed_phrases: string[];
+  };
+  queries: Array<{ keyword: string; volume: number; intent: string }>;
+  query_source: 'labs' | 'llm';
+}
+
+/** Scrape + DNA + auto-picked queries. Slow (~30-70s) — callers show progress. */
+export function analyzeDna(payload: DnaPayload): Promise<DnaResponse> {
+  return request<DnaResponse>('/api/dna', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 }
 
 export function startAudit(payload: StartAuditPayload): Promise<StartAuditResult> {

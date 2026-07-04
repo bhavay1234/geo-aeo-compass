@@ -4,6 +4,7 @@ import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
 import { BleedBar, StatePill, Sparkline } from "@/components/terminal/primitives";
 import {
   buildGapRows,
+  buildLlmScorecards,
   computeShareOfVoice,
   llmsPolled,
   type GapRow,
@@ -85,16 +86,20 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const gaps = buildGapRows(audit, polls);
   const sovFull = computeShareOfVoice(audit, polls);
   const llms = llmsPolled(audit);
+  const scorecards = buildLlmScorecards(audit, polls);
 
   // total = distinct queries (one per gap row after per-query aggregation).
   // Per-LLM answers = queries × LLMs — the buyer-facing denominator on multi-LLM
   // audits ("invisible in N of {queries × 3} high-intent AI answers").
   const total = gaps.length;
-  const totalAnswers = total * llms.length;
   const absent = gaps.filter((g) => g.state === "absent").length;
   const weak = gaps.filter((g) => g.state === "weak").length;
   const held = gaps.filter((g) => g.state === "held").length;
-  const absentAnswers = gaps.reduce((s, g) => s + g.absentLlms.length, 0);
+  // Answer counts come from ACTUAL captured polls — identical to the
+  // StatusBar's math, and failed polls (no row) are never counted as
+  // "invisible" answers that ChatGPT/Gemini/Perplexity didn't actually give.
+  const totalAnswers = polls.length;
+  const absentAnswers = polls.filter((p) => !p.brand_cited).length;
 
   // Plain-language headline: inferred category + who leads citation share.
   const category = (audit.category ?? "").trim();
@@ -223,6 +228,120 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
           {verdict}
         </p>
       </div>
+
+      {/* Per-LLM scorecards — individual visibility per engine, never merged. */}
+      {llms.length > 1 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${scorecards.length}, 1fr)`,
+            borderBottom: "1px solid var(--grid-2)",
+          }}
+        >
+          {scorecards.map((s, i) => (
+            <div
+              key={s.llm}
+              className="tm-reveal"
+              style={{
+                padding: "16px 18px",
+                borderRight: i < scorecards.length - 1 ? "1px solid var(--grid)" : "none",
+                background: "var(--bg)",
+                animationDelay: `${i * 0.05}s`,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                <span
+                  className="mono"
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 800,
+                    letterSpacing: ".08em",
+                    textTransform: "uppercase",
+                    color: "var(--ink-2)",
+                  }}
+                >
+                  {LLM_LABEL[s.llm]}
+                </span>
+                {s.answers < s.expected && (
+                  <span className="mono" style={{ fontSize: 9, color: "var(--warn)" }}>
+                    {s.expected - s.answers} answer{s.expected - s.answers === 1 ? "" : "s"} missing
+                  </span>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                <span
+                  style={{
+                    fontFamily: "Archivo",
+                    fontWeight: 800,
+                    fontSize: 34,
+                    letterSpacing: "-.03em",
+                    lineHeight: 0.9,
+                    color:
+                      s.visibility >= 67
+                        ? "var(--pos)"
+                        : s.visibility > 0
+                          ? "var(--warn)"
+                          : "var(--hot)",
+                  }}
+                >
+                  {s.answers ? s.visibility : "—"}
+                </span>
+                {s.answers > 0 && (
+                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                    /100 visibility
+                  </span>
+                )}
+              </div>
+              <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-2)", marginTop: 8 }}>
+                named in answer{" "}
+                <b style={{ color: s.namedIn > 0 ? "var(--pos)" : "var(--hot)" }}>
+                  {s.namedIn}/{s.answers}
+                </b>
+                {" · "}in citations{" "}
+                <b style={{ color: s.citedIn > 0 ? "var(--pos)" : "var(--hot)" }}>
+                  {s.citedIn}/{s.answers}
+                </b>
+              </div>
+              {s.sov.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  {s.sov.slice(0, 3).map((e) => (
+                    <div
+                      key={e.name}
+                      style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 10.5,
+                          fontWeight: e.isYou ? 700 : 500,
+                          color: e.isYou ? "var(--you)" : "var(--ink-2)",
+                          width: 90,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {e.name}
+                      </span>
+                      <div style={{ flex: 1, height: 5, background: "var(--grid)", borderRadius: 2, overflow: "hidden" }}>
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${e.pct}%`,
+                            background: e.isYou ? "var(--you)" : "var(--ink-3)",
+                          }}
+                        />
+                      </div>
+                      <span className="mono" style={{ fontSize: 9.5, width: 28, textAlign: "right", color: "var(--ink-3)" }}>
+                        {e.pct}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <div className="tm-grid">
         {/* FOCAL: visibility gaps */}
       <div className="tm-panel tm-gap-span tm-reveal">

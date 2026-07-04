@@ -2,7 +2,7 @@ import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
-import { startAudit, getRecentAudits } from "@/lib/client/api";
+import { startAudit, getRecentAudits, analyzeDna, type DnaResponse } from "@/lib/client/api";
 import { useTheme } from "@/components/terminal/useTheme";
 import type { AuditStatus } from "@/lib/db/types";
 
@@ -43,12 +43,25 @@ function Index() {
   const [competitors, setCompetitors] = useState("");
   const [queries, setQueries] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [intent, setIntent] = useState<"transactional" | "general">("transactional");
+  const [dna, setDna] = useState<DnaResponse["dna"] | null>(null);
+  const [querySource, setQuerySource] = useState<"labs" | "llm" | null>(null);
 
   const queryCount = splitLines(queries).length;
 
   const recentQuery = useQuery({
     queryKey: ["recent-audits"],
     queryFn: getRecentAudits,
+  });
+
+  const dnaMutation = useMutation({
+    mutationFn: analyzeDna,
+    onSuccess: (r) => {
+      setDna(r.dna);
+      setQuerySource(r.query_source);
+      setBrandName(r.dna.brand_name);
+      setQueries(r.queries.map((q) => q.keyword).join("\n"));
+    },
   });
 
   const mutation = useMutation({
@@ -71,6 +84,7 @@ function Index() {
       domain: domain.trim(),
       competitors: splitCommas(competitors),
       queries: cleanedQueries,
+      brand_dna: dna ?? undefined,
     });
   }
 
@@ -121,6 +135,101 @@ function Index() {
               Enter your brand, the competitors you track, and the buyer queries
               you care about. We poll ChatGPT, Perplexity and Gemini for each and measure where you show up.
             </p>
+
+            {/* ① Auto-build from the website: scrape -> Brand DNA -> 20 queries
+                picked by DataForSEO search volume. Intent question REQUIRED
+                before generation. */}
+            <div
+              style={{
+                marginTop: 18,
+                border: "1px solid var(--grid-2)",
+                borderRadius: 4,
+                padding: "14px 14px 16px",
+                background: "var(--panel)",
+              }}
+            >
+              <div className="tm-label">① Start from your website</div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <input
+                  className="tm-input"
+                  placeholder="yourdomain.com"
+                  value={domain}
+                  onChange={(e) => setDomain(e.target.value)}
+                  disabled={dnaMutation.isPending || submitting}
+                  style={{ flex: 1 }}
+                />
+                <button
+                  className="tm-btn"
+                  onClick={() => {
+                    setValidationError(null);
+                    if (!domain.trim()) return setValidationError("Enter your domain first.");
+                    dnaMutation.mutate({ domain: domain.trim(), intent });
+                  }}
+                  disabled={dnaMutation.isPending || submitting}
+                >
+                  {dnaMutation.isPending ? "Analyzing…" : "Analyze website ▸"}
+                </button>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: "var(--ink-3)" }}>Query intent:</span>
+                {(
+                  [
+                    ["transactional", "Transactional (best X, X vs Y, pricing)"],
+                    ["general", "General (incl. informational)"],
+                  ] as const
+                ).map(([k, label]) => (
+                  <button
+                    key={k}
+                    className="tm-chip"
+                    onClick={() => setIntent(k)}
+                    disabled={dnaMutation.isPending}
+                    style={{
+                      cursor: "pointer",
+                      background: intent === k ? "var(--ink)" : "var(--panel-2)",
+                      color: intent === k ? "var(--bg)" : "var(--ink-2)",
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {dnaMutation.isPending && (
+                <p className="mono" style={{ marginTop: 10, fontSize: 11, color: "var(--ink-3)" }}>
+                  ◴ Reading {domain} — scraping the site, building Brand DNA, and
+                  picking the top queries by search volume… (~1 min)
+                </p>
+              )}
+              {dnaMutation.isError && (
+                <p style={{ marginTop: 10, fontSize: 12, color: "var(--neg)" }}>
+                  {(dnaMutation.error as Error)?.message || "Analysis failed."}
+                </p>
+              )}
+
+              {dna && (
+                <div style={{ marginTop: 12, borderTop: "1px solid var(--grid)", paddingTop: 12 }}>
+                  <div className="tm-label">Brand DNA</div>
+                  <p className="nar" style={{ fontSize: 14, lineHeight: 1.5, color: "var(--ink)" }}>
+                    {dna.positioning || "—"}
+                  </p>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                    {dna.category && <span className="tm-chip">{dna.category}</span>}
+                    {dna.audience && <span className="tm-chip">{dna.audience}</span>}
+                    {dna.products.map((pr) => (
+                      <span key={pr} className="tm-chip" style={{ background: "var(--you-bg)", color: "var(--you)" }}>
+                        {pr}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mono" style={{ marginTop: 8, fontSize: 10.5, color: "var(--ink-3)" }}>
+                    {querySource === "labs"
+                      ? "Queries picked by DataForSEO search volume — review/edit below, then run."
+                      : "Queries generated from the Brand DNA — review/edit below, then run."}
+                  </p>
+                </div>
+              )}
+            </div>
 
             <div
               style={{

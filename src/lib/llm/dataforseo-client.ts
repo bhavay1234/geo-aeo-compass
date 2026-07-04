@@ -67,6 +67,14 @@ export async function pollChatGPTviaDFS(
         user_prompt: query,
         model_name: 'gpt-5.3-chat-latest',
         web_search: true,
+        // Live-verified: without this nudge gpt-5.3 often answers product
+        // queries from training with ZERO sources; with it, it searches and
+        // returns annotations + inline links (matching chatgpt.com behavior
+        // for shopping-style queries).
+        system_message:
+          'When the question involves products, brands, comparisons, or ' +
+          'recommendations, use web search to ground your answer and cite ' +
+          'your sources with links.',
       },
     ],
     env
@@ -108,6 +116,94 @@ export async function pollGemini(
     env
   );
   return normalize(data, 'gemini', 'gemini-2.5-flash');
+}
+
+/**
+ * Generic DFS LLM call (no web search) that must return JSON — powers Brand
+ * DNA synthesis without an OpenAI key. Returns the parsed object or null.
+ */
+export async function dfsLlmJson(
+  systemMessage: string,
+  userPrompt: string,
+  env: Env
+): Promise<unknown | null> {
+  try {
+    const data = await callDFS(
+      '/ai_optimization/chat_gpt/llm_responses/live',
+      [
+        {
+          user_prompt: userPrompt,
+          model_name: 'gpt-4o',
+          system_message: systemMessage,
+          web_search: false,
+          temperature: 0.2,
+        },
+      ],
+      env
+    );
+    const norm = normalize(data, 'chatgpt', 'gpt-4o (dfs json)');
+    const text = norm.response_text
+      .replace(/^```(?:json)?\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+    if (!text) return null;
+    // Model sometimes wraps JSON in prose — grab the outermost object.
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start === -1 || end <= start) return null;
+    return JSON.parse(text.slice(start, end + 1));
+  } catch (err: any) {
+    console.error('[dfs-llm-json] failed:', err?.message);
+    return null;
+  }
+}
+
+export interface KeywordSuggestion {
+  keyword: string;
+  volume: number;
+  intent: string; // informational | navigational | commercial | transactional
+}
+
+/**
+ * DataForSEO Labs keyword_suggestions for one seed phrase, volume-ranked.
+ * Includes per-keyword search-intent classification.
+ */
+export async function dfsKeywordSuggestions(
+  seed: string,
+  env: Env,
+  limit = 40
+): Promise<KeywordSuggestion[]> {
+  const data = (await callDFS(
+    '/dataforseo_labs/google/keyword_suggestions/live',
+    [
+      {
+        keyword: seed,
+        location_code: 2840,
+        language_code: 'en',
+        limit,
+        order_by: ['keyword_info.search_volume,desc'],
+      },
+    ],
+    env
+  )) as AnyObj;
+  const tasks = (data?.tasks as AnyObj[] | undefined) ?? [];
+  const result = (tasks[0]?.result as AnyObj[] | undefined) ?? [];
+  const items = (result[0]?.items as AnyObj[] | undefined) ?? [];
+  const out: KeywordSuggestion[] = [];
+  for (const i of items) {
+    const keyword = typeof i.keyword === 'string' ? i.keyword.trim() : '';
+    if (!keyword) continue;
+    const info = (i.keyword_info as AnyObj | undefined) ?? {};
+    const intent =
+      ((i.search_intent_info as AnyObj | undefined)?.main_intent as string) ??
+      'informational';
+    out.push({
+      keyword,
+      volume: typeof info.search_volume === 'number' ? info.search_volume : 0,
+      intent,
+    });
+  }
+  return out;
 }
 
 // ── normalization ──────────────────────────────────────────────────────────
@@ -166,6 +262,8 @@ function refsFromMarkdown(text: string): AnyObj[] {
   const out: AnyObj[] = [];
   const seen = new Set<string>();
   for (const m of text.matchAll(/\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)]+)\)/g)) {
+    // Skip markdown images ![alt](url) — they're assets, not citations.
+    if (m.index !== undefined && m.index > 0 && text[m.index - 1] === '!') continue;
     const url = m[2];
     if (seen.has(url)) continue;
     seen.add(url);

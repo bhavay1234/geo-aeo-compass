@@ -343,6 +343,53 @@ export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry
 
 /** Per-LLM Share of Recommendations — one SoV list per LLM (for the demo
  *  "who's nastier: ChatGPT or Perplexity" comparison bars). */
+export interface LlmScorecard {
+  llm: LlmSource;
+  /** Answers actually captured from this LLM (rows). */
+  answers: number;
+  /** Queries polled — answers may be lower if some polls failed. */
+  expected: number;
+  /** Answers where the brand is NAMED in the answer text ("prompt presence"). */
+  namedIn: number;
+  /** Answers where the brand's own domain appears in the CITATIONS rail. */
+  citedIn: number;
+  /** Per-LLM visibility score: named-in-answer share of captured answers. */
+  visibility: number;
+  /** Per-LLM share of recommendations (top entries, you included). */
+  sov: SovEntry[];
+}
+
+/**
+ * One scorecard per polled LLM — the "don't merge the LLMs" view. Visibility,
+ * prompt-presence (named in the answer) vs citation-presence (your domain in
+ * the sources rail), and per-LLM share of recommendations, each computed over
+ * ONLY that LLM's answers.
+ */
+export function buildLlmScorecards(audit: Audit, polls: PollResult[]): LlmScorecard[] {
+  const expected = groupPollsByQuery(polls).size;
+  const ownNorm = normalizeDomain(audit.domain);
+  return llmsPolled(audit).map((llm) => {
+    const subset = polls.filter((p) => normalizeLlm(p.llm_source) === llm);
+    const namedIn = subset.filter((p) => p.brand_cited).length;
+    const citedIn = subset.filter((p) =>
+      (p.citations ?? []).some((c) => {
+        if (c.source_type === "own") return true;
+        const d = normalizeDomain(c.domain);
+        return !!ownNorm && (d === ownNorm || d.endsWith("." + ownNorm));
+      })
+    ).length;
+    return {
+      llm,
+      answers: subset.length,
+      expected,
+      namedIn,
+      citedIn,
+      visibility: subset.length ? Math.round((namedIn / subset.length) * 100) : 0,
+      sov: computeShareOfVoice(audit, subset).slice(0, 4),
+    };
+  });
+}
+
 export function computeShareOfVoiceByLlm(
   audit: Audit,
   polls: PollResult[]
@@ -533,13 +580,18 @@ export function buildCompetitorProfiles(
     const appears = polls.filter((p) =>
       pollRecommends(p, e.isYou, e.name, audit.brand_name)
     );
-    const strengths = appears.map((p) => p.query_text).slice(0, 4);
+    // Dedupe by query: multi-LLM audits have one row per (query, llm), and a
+    // brand recommended by all 3 LLMs must not produce triple chips.
+    const strengths = Array.from(new Set(appears.map((p) => p.query_text))).slice(0, 4);
     const beatsYou = e.isYou
       ? []
-      : appears
-          .filter((p) => !p.brand_cited || (p.brand_position ?? 99) > 2)
-          .map((p) => p.query_text)
-          .slice(0, 5);
+      : Array.from(
+          new Set(
+            appears
+              .filter((p) => !p.brand_cited || (p.brand_position ?? 99) > 2)
+              .map((p) => p.query_text)
+          )
+        ).slice(0, 5);
 
     // Co-cited sources across the queries where this entity appears.
     const srcCount = new Map<string, ProfileSource>();
