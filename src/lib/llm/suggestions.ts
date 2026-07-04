@@ -164,14 +164,16 @@ const INFLUENCE_SYSTEM =
   'raw HTML) for the named brand X and for the target brand (us): how many of ' +
   "this query's cited sources name each, the source types, cross-audit presence, " +
   'and whether each has a dedicated own page. Rules:\n' +
-  '- 2-4 sentences. LEAD with the citation evidence (which/how many cited sources ' +
-  'name X) — that is the strongest signal.\n' +
-  '- Name the SINGLE most decisive factor: citations, third-party presence, or own-site.\n' +
-  '- Then explain why the target was NOT named, concretely (e.g. appears in 0 of the ' +
-  'cited sources; absent from the G2/listicle pages), and the closest gap to close.\n' +
+  '- EXACTLY 2 sentences, tight. Sentence 1: the single most decisive factor for X ' +
+  '(citations, third-party presence, or own-site) with the concrete number. ' +
+  'Sentence 2: why the target was NOT named + the closest gap to close.\n' +
+  '- VARY your wording per brand — do NOT reuse a fixed template. Never open every ' +
+  'verdict with "N of the ten cited sources..."; lead differently each time (the ' +
+  'source type, the cross-audit pattern, the own-page gap) and cite the number ' +
+  'inline. Two brands with similar signals must still read as distinct sentences.\n' +
   '- Use "likely/primarily" framing — these signals correlate with ChatGPT citation, ' +
   'they are NOT proof of its ranking algorithm. Never claim to know its exact logic.\n' +
-  '- No preamble, no markdown, no bullet points. One short paragraph of plain prose.';
+  '- No preamble, no markdown, no bullet points, no restating the brand name twice.';
 
 /**
  * "Why was brand X named (and not you)" — ONE gpt-4o-mini call over the
@@ -194,8 +196,8 @@ export async function inferInfluenceVerdict(
     const completion = await withTimeout(
       openai.chat.completions.create({
         model: MODEL,
-        temperature: 0.3,
-        max_tokens: 220,
+        temperature: 0.6,
+        max_tokens: 160,
         messages: [
           { role: 'system', content: INFLUENCE_SYSTEM },
           { role: 'user', content: JSON.stringify(summary) },

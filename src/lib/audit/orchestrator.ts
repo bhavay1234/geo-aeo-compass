@@ -1,7 +1,7 @@
 import { pollChatGPT } from '../llm';
 import { parseCitations } from './citation-parser';
 import { generateQueries, type BuyerQuery } from './query-bank';
-import { extractProseBrands } from './prose-brands';
+import { extractProseBrands, brandInProse } from './prose-brands';
 import { competitorToDomain, normalizeDomain } from './source-classifier';
 import {
   inferPositioning,
@@ -716,7 +716,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
         // prose extraction (bold spans / headings / numbered leads) so the
         // competitor signal survives an OpenAI-free deployment.
         const effectiveBrands = llm?.brandsNamed?.length
-          ? llm.brandsNamed
+          ? llm.brandsNamed.filter((b) => brandInProse(b, poll.full_response))
           : extractProseBrands(poll.full_response || '', brandName);
         await supabase
           .from('poll_results')
@@ -733,7 +733,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
     const brandsNamedAll = new Map<string, string>(); // lower -> display
     for (const { poll, llm } of perQuery) {
       const effective = llm?.brandsNamed?.length
-        ? llm.brandsNamed
+        ? llm.brandsNamed.filter((b) => brandInProse(b, poll.full_response))
         : extractProseBrands(poll.full_response || '', brandName);
       for (const b of effective) {
         const nm = b.trim();

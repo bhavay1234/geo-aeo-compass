@@ -310,7 +310,7 @@ function normalize(
     const url = typeof ref.url === 'string' ? ref.url : '';
     if (!url) return;
     const title = typeof ref.title === 'string' ? ref.title : '';
-    const domain = extractDomain(url);
+    const domain = citationDomain(url, title);
     raw_citations.push({
       order: i,
       url,
@@ -338,6 +338,27 @@ function normalize(
     error: response_text ? undefined : errMsg ?? `DFS ${llm}: empty response`,
     model_used: modelUsed,
   };
+}
+
+// Gemini grounding wraps every source in a vertexaisearch redirect proxy
+// (https://vertexaisearch.cloud.google.com/grounding-api-redirect/<token>); the
+// real publisher domain rides in the annotation's `title` ("oracle.com"). Prefer
+// that over the proxy host so the citation rail shows the true source instead of
+// N identical "vertexaisearch.cloud.google.com" chips. The proxy URL is kept for
+// click-through (it 302s to the exact page); only the displayed domain changes.
+function citationDomain(url: string, title: string): string {
+  const host = extractDomain(url);
+  if (host === 'vertexaisearch.cloud.google.com') {
+    const fromTitle = domainFromTitle(title);
+    if (fromTitle) return fromTitle;
+  }
+  return host;
+}
+
+/** A bare-domain title ("emotrans-global.com") → normalized domain, else ''. */
+function domainFromTitle(title: string): string {
+  const t = (title || '').trim().toLowerCase().replace(/^www\./, '');
+  return /^[a-z0-9]([a-z0-9-]*\.)+[a-z]{2,}$/.test(t) ? t : '';
 }
 
 function extractDomain(url: string): string {

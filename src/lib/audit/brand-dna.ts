@@ -114,15 +114,21 @@ const CONTEXT_NOISE =
 export function rankCandidates(
   suggestions: KeywordSuggestion[],
   brandName: string,
-  intentMode: IntentMode
+  intentMode: IntentMode,
+  opts: { enforceIntent?: boolean } = {}
 ): Array<{ sig: string; s: KeywordSuggestion }> {
+  // enforceIntent=false PREFERS transactional (ordering) instead of hard-dropping
+  // non-transactional candidates — so a seed theme whose Labs data skews
+  // informational ("supply chain visibility") still contributes to the pool.
+  const enforceIntent = opts.enforceIntent !== false;
   const brand = brandName.trim().toLowerCase();
   const bySig = new Map<string, KeywordSuggestion>();
   for (const s of suggestions) {
     const kw = s.keyword.toLowerCase();
     if (s.intent === 'navigational') continue;
     if (JUNK_WORDS.test(kw) || GEO_TAIL.test(kw) || CONTEXT_NOISE.test(kw)) continue;
-    if (intentMode === 'transactional' && !TRANSACTIONAL_INTENTS.has(s.intent)) continue;
+    if (enforceIntent && intentMode === 'transactional' && !TRANSACTIONAL_INTENTS.has(s.intent))
+      continue;
     // Own-brand keywords: keep comparisons ("brand vs x"), drop pure brand navs.
     if (brand && kw.includes(brand) && !/\bvs\b|\balternative/i.test(kw)) continue;
     const sig = wordSig(s.keyword);
@@ -130,9 +136,46 @@ export function rankCandidates(
     const ex = bySig.get(sig);
     if (!ex || s.volume > ex.volume) bySig.set(sig, s);
   }
+  const txnFirst = !enforceIntent && intentMode === 'transactional';
   return Array.from(bySig.entries())
-    .sort((a, b) => b[1].volume - a[1].volume)
+    .sort((a, b) => {
+      if (txnFirst) {
+        const at = TRANSACTIONAL_INTENTS.has(a[1].intent) ? 1 : 0;
+        const bt = TRANSACTIONAL_INTENTS.has(b[1].intent) ? 1 : 0;
+        if (at !== bt) return bt - at;
+      }
+      return b[1].volume - a[1].volume;
+    })
     .map(([sig, s]) => ({ sig, s }));
+}
+
+/**
+ * Balanced candidate pool for the LLM selector: rank each seed's suggestions
+ * SEPARATELY (intent preferred, not enforced) and round-robin up to
+ * `perSeedFloor` from each. Guarantees every seed theme reaches the selector
+ * instead of one high-volume seed (e.g. "transportation management") flooding
+ * the pool and crowding the other themes out before the LLM ever sees them.
+ */
+export function balancedPool(
+  perSeed: KeywordSuggestion[][],
+  brandName: string,
+  intentMode: IntentMode,
+  perSeedFloor = 8
+): Array<{ sig: string; s: KeywordSuggestion }> {
+  const rankedPerSeed = perSeed.map((list) =>
+    rankCandidates(list, brandName, intentMode, { enforceIntent: false })
+  );
+  const seen = new Set<string>();
+  const out: Array<{ sig: string; s: KeywordSuggestion }> = [];
+  for (let i = 0; i < perSeedFloor; i++) {
+    for (const rl of rankedPerSeed) {
+      const c = rl[i];
+      if (!c || seen.has(c.sig)) continue;
+      seen.add(c.sig);
+      out.push(c);
+    }
+  }
+  return out;
 }
 
 export function pickQueries(
@@ -224,43 +267,56 @@ export async function buildBrandDna(
     dna.seed_phrases.map((seed) => dfsKeywordSuggestions(seed, env, 40))
   );
   const PER_SEED_CAP = 14;
+  const perSeed: KeywordSuggestion[][] = [];
   const all: KeywordSuggestion[] = [];
   for (const s of settled)
     if (s.status === 'fulfilled') {
       const top = [...s.value].sort((a, b) => b.volume - a.volume).slice(0, PER_SEED_CAP);
+      perSeed.push(top);
       all.push(...top);
     }
 
-  const ranked = rankCandidates(all, dna.brand_name, intentMode);
+  const ranked = rankCandidates(all, dna.brand_name, intentMode); // strict — heuristic fallback
+  const pool = balancedPool(perSeed, dna.brand_name, intentMode); // diverse — LLM selector
   let queries: DnaQueryPick[] = [];
   let source: 'labs' | 'llm' = 'labs';
 
-  // JUDGMENT: when OpenAI is configured, let it pick the final 20 — drops
-  // off-category keywords and diversifies across sub-topics far better than
-  // regex. Chosen keywords are verbatim, so we map back the real volumes.
-  if (env.OPENAI_API_KEY && ranked.length >= 5) {
+  // JUDGMENT: when OpenAI is configured, let it pick the final 20 from the
+  // BALANCED per-seed pool — drops off-category keywords and diversifies across
+  // sub-topics far better than regex. Chosen keywords are verbatim, so we map
+  // back the real volumes.
+  if (env.OPENAI_API_KEY && pool.length >= 5) {
     const chosen = await selectBuyerQueries(
       {
         brandName: dna.brand_name,
         category: dna.category,
         positioning: dna.positioning,
         intentMode,
-        candidates: ranked.map((r) => ({ keyword: r.s.keyword, volume: r.s.volume })),
+        candidates: pool.map((r) => ({ keyword: r.s.keyword, volume: r.s.volume })),
       },
       env,
       20
     );
-    const byKw = new Map(ranked.map((r) => [r.s.keyword.toLowerCase(), r.s]));
+    const byKw = new Map(pool.map((r) => [r.s.keyword.toLowerCase(), r.s]));
     const seenSel = new Set<string>();
+    const pickedSigs: string[] = [];
     for (const kw of chosen) {
       const k = kw.trim().toLowerCase();
       if (!k || seenSel.has(k)) continue;
       seenSel.add(k);
       const hit = byKw.get(k);
+      const keyword = hit ? hit.keyword : kw.trim();
+      // Diversity guard: the LLM occasionally still returns near-duplicate
+      // rewordings ("transportation management systems software" vs "...system
+      // software"). Drop a pick sharing >=0.55 word-signature with one already
+      // kept, mirroring the heuristic pickQueries guard.
+      const sig = wordSig(keyword);
+      if (pickedSigs.some((p) => jaccard(sig, p) >= 0.55)) continue;
+      pickedSigs.push(sig);
       queries.push(
         hit
           ? { keyword: hit.keyword, volume: hit.volume, intent: hit.intent }
-          : { keyword: kw.trim(), volume: 0, intent: intentMode === 'transactional' ? 'commercial' : 'mixed' }
+          : { keyword, volume: 0, intent: intentMode === 'transactional' ? 'commercial' : 'mixed' }
       );
       if (queries.length >= 20) break;
     }

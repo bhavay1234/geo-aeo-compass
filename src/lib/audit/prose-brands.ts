@@ -57,6 +57,26 @@ export function isBrandLike(raw: string): boolean {
   return true;
 }
 
+/**
+ * True if `name` actually appears in the answer prose. Guards against the LLM
+ * extractor INVENTING competitor names that were never in the answer (the
+ * hallucinated "recommended instead of you" on educational answers). Matches
+ * the full name, or its distinctive first token as a whole word ("Oracle" for
+ * "Oracle Transportation Management"), so a real brand written in short form in
+ * the answer isn't dropped. No answer text → cannot verify → keep (don't drop).
+ */
+export function brandInProse(name: string, prose: string | null | undefined): boolean {
+  const text = (prose || '').toLowerCase();
+  if (!text) return true;
+  const nm = (name || '').trim().toLowerCase();
+  if (!nm) return false;
+  if (text.includes(nm)) return true;
+  const first = nm.split(/\s+/)[0];
+  if (first.length < 3) return false;
+  const esc = first.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`\\b${esc}\\b`).test(text);
+}
+
 export function extractProseBrands(text: string, ownName: string): string[] {
   if (!text) return [];
   const own = ownName.trim().toLowerCase();

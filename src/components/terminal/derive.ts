@@ -6,7 +6,7 @@ import type {
   LlmSource,
 } from "@/lib/db/types";
 import { normalizeDomain, competitorToDomain } from "@/lib/audit/source-classifier";
-import { isBrandLike } from "@/lib/audit/prose-brands";
+import { isBrandLike, brandInProse } from "@/lib/audit/prose-brands";
 
 export type QueryState = "absent" | "weak" | "held";
 
@@ -108,7 +108,11 @@ export function recommendedBrands(p: PollResult, ownName: string): string[] {
     out.push(nm);
   };
   for (const c of p.competitors_cited ?? []) add(c.name);
-  for (const b of p.brands_named ?? []) if (isBrandLike(b)) add(b);
+  // brands_named must actually appear in the answer — the LLM occasionally
+  // invents rivals on educational answers ("recommended instead of you" with
+  // brands never in the text). Verify against the prose before counting them.
+  for (const b of p.brands_named ?? [])
+    if (isBrandLike(b) && brandInProse(b, p.full_response)) add(b);
   return out;
 }
 
