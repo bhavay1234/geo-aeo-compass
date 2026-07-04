@@ -339,3 +339,70 @@ export async function generateQuerySuggestion(
     return null;
   }
 }
+
+/**
+ * Pick the final buyer queries for a Brand-DNA audit from DataForSEO Labs
+ * candidates, with real judgment — DROPs off-category keywords that merely
+ * share words ("transportation LEARNING management"), DIVERSIFIES across
+ * sub-topics instead of 20 rewordings of one phrase, and honors intent mode.
+ * Returns chosen keywords VERBATIM (so the caller maps back real volumes).
+ * Returns [] when no key / on failure so the caller falls back to heuristics.
+ */
+export async function selectBuyerQueries(
+  input: {
+    brandName: string;
+    category: string;
+    positioning: string;
+    intentMode: 'transactional' | 'general';
+    candidates: Array<{ keyword: string; volume: number }>;
+  },
+  env: Env,
+  limit = 20
+): Promise<string[]> {
+  if (!env.OPENAI_API_KEY || input.candidates.length === 0) return [];
+  const intentLine =
+    input.intentMode === 'transactional'
+      ? 'Strongly prefer transactional/commercial intent (best X, X vs Y, top X, X pricing, X alternatives).'
+      : 'Allow a mix of commercial and informational intent.';
+  const system =
+    `You select buyer search queries for an AI-visibility (AEO) audit. From the ` +
+    `CANDIDATE keywords (each with monthly search volume "v"), choose up to ${limit} ` +
+    `that best capture how real buyers research THIS product category in AI ` +
+    `assistants. Rules: (1) genuinely in the brand's category — DROP keywords that ` +
+    `merely share words but are a DIFFERENT software category (e.g. "transportation ` +
+    `learning management", "document management" for a freight-visibility brand); ` +
+    `(2) DIVERSE — cover distinct sub-topics/use-cases, NEVER many near-duplicate ` +
+    `rewordings of one phrase; (3) ${intentLine} (4) drop location-specific ("... ` +
+    `india", city/state) and navigational lookups. Return ONLY JSON ` +
+    `{"queries":[string]} using keywords EXACTLY as given (verbatim), no new text.`;
+  const user = JSON.stringify({
+    brand: input.brandName,
+    category: input.category || '(unknown)',
+    positioning: input.positioning.slice(0, 300),
+    candidates: input.candidates.slice(0, 60).map((c) => ({ k: c.keyword, v: c.volume })),
+  });
+  try {
+    const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+    const completion = await withTimeout(
+      openai.chat.completions.create({
+        model: MODEL,
+        temperature: 0.2,
+        max_tokens: 800,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      15000
+    );
+    const parsed = JSON.parse(
+      stripFences(completion.choices[0]?.message?.content || '')
+    ) as { queries?: unknown };
+    return Array.isArray(parsed.queries)
+      ? (parsed.queries as unknown[]).filter((q): q is string => typeof q === 'string')
+      : [];
+  } catch (err: any) {
+    console.error('[select-queries] failed:', err?.message);
+    return [];
+  }
+}

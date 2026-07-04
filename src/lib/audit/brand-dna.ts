@@ -6,6 +6,7 @@ import {
   dfsKeywordSuggestions,
   type KeywordSuggestion,
 } from '../llm/dataforseo-client';
+import { selectBuyerQueries } from '../llm/suggestions';
 import { normalizeDomain } from './source-classifier';
 
 /**
@@ -107,12 +108,14 @@ const CONTEXT_NOISE =
  * user's intent mode, rank by volume with a diversity guard so the list isn't
  * 20 variants of one phrase.
  */
-export function pickQueries(
+/** Filter (junk/geo/intent/own-brand) + dedupe permutations by word-signature,
+ *  volume-desc. Returns the clean candidate pool WITHOUT a diversity cap —
+ *  callers add diversity (heuristic or LLM). */
+export function rankCandidates(
   suggestions: KeywordSuggestion[],
   brandName: string,
-  intentMode: IntentMode,
-  limit = 20
-): DnaQueryPick[] {
+  intentMode: IntentMode
+): Array<{ sig: string; s: KeywordSuggestion }> {
   const brand = brandName.trim().toLowerCase();
   const bySig = new Map<string, KeywordSuggestion>();
   for (const s of suggestions) {
@@ -127,16 +130,28 @@ export function pickQueries(
     const ex = bySig.get(sig);
     if (!ex || s.volume > ex.volume) bySig.set(sig, s);
   }
+  return Array.from(bySig.entries())
+    .sort((a, b) => b[1].volume - a[1].volume)
+    .map(([sig, s]) => ({ sig, s }));
+}
 
-  const ranked = Array.from(bySig.entries()).sort((a, b) => b[1].volume - a[1].volume);
-  const picked: Array<[string, KeywordSuggestion]> = [];
-  for (const [sig, s] of ranked) {
+export function pickQueries(
+  suggestions: KeywordSuggestion[],
+  brandName: string,
+  intentMode: IntentMode,
+  limit = 20
+): DnaQueryPick[] {
+  const ranked = rankCandidates(suggestions, brandName, intentMode);
+  const picked: Array<{ sig: string; s: KeywordSuggestion }> = [];
+  for (const c of ranked) {
     if (picked.length >= limit) break;
-    // Diversity guard: skip near-duplicates of anything already picked.
-    if (picked.some(([psig]) => jaccard(sig, psig) >= 0.7)) continue;
-    picked.push([sig, s]);
+    // Diversity guard: skip near-duplicates of anything already picked. 0.55 is
+    // tighter than before — "transportation management X" variants share enough
+    // words to be caught even when the trailing modifier differs.
+    if (picked.some((p) => jaccard(c.sig, p.sig) >= 0.55)) continue;
+    picked.push(c);
   }
-  return picked.map(([, s]) => ({
+  return picked.map(({ s }) => ({
     keyword: s.keyword,
     volume: s.volume,
     intent: s.intent,
@@ -201,15 +216,58 @@ export async function buildBrandDna(
     dna.seed_phrases = [dna.category, `best ${dna.category}`];
   }
 
-  // Labs suggestions per seed — parallel, failures per-seed tolerated.
+  // Labs suggestions per seed — parallel, failures per-seed tolerated. Cap each
+  // seed's contribution so one broad seed ("transportation management") can't
+  // flood the pool with 200 near-identical variants and crowd out the other
+  // themes. Balanced pool → the selector actually has diverse material.
   const settled = await Promise.allSettled(
     dna.seed_phrases.map((seed) => dfsKeywordSuggestions(seed, env, 40))
   );
+  const PER_SEED_CAP = 14;
   const all: KeywordSuggestion[] = [];
-  for (const s of settled) if (s.status === 'fulfilled') all.push(...s.value);
+  for (const s of settled)
+    if (s.status === 'fulfilled') {
+      const top = [...s.value].sort((a, b) => b.volume - a.volume).slice(0, PER_SEED_CAP);
+      all.push(...top);
+    }
 
-  let queries = pickQueries(all, dna.brand_name, intentMode);
+  const ranked = rankCandidates(all, dna.brand_name, intentMode);
+  let queries: DnaQueryPick[] = [];
   let source: 'labs' | 'llm' = 'labs';
+
+  // JUDGMENT: when OpenAI is configured, let it pick the final 20 — drops
+  // off-category keywords and diversifies across sub-topics far better than
+  // regex. Chosen keywords are verbatim, so we map back the real volumes.
+  if (env.OPENAI_API_KEY && ranked.length >= 5) {
+    const chosen = await selectBuyerQueries(
+      {
+        brandName: dna.brand_name,
+        category: dna.category,
+        positioning: dna.positioning,
+        intentMode,
+        candidates: ranked.map((r) => ({ keyword: r.s.keyword, volume: r.s.volume })),
+      },
+      env,
+      20
+    );
+    const byKw = new Map(ranked.map((r) => [r.s.keyword.toLowerCase(), r.s]));
+    const seenSel = new Set<string>();
+    for (const kw of chosen) {
+      const k = kw.trim().toLowerCase();
+      if (!k || seenSel.has(k)) continue;
+      seenSel.add(k);
+      const hit = byKw.get(k);
+      queries.push(
+        hit
+          ? { keyword: hit.keyword, volume: hit.volume, intent: hit.intent }
+          : { keyword: kw.trim(), volume: 0, intent: intentMode === 'transactional' ? 'commercial' : 'mixed' }
+      );
+      if (queries.length >= 20) break;
+    }
+  }
+
+  // Heuristic fallback (no key, or the selector returned too little).
+  if (queries.length < 5) queries = pickQueries(all, dna.brand_name, intentMode);
 
   // Fallback: no usable Labs data → ask the LLM directly for buyer queries.
   if (queries.length < 5) {
