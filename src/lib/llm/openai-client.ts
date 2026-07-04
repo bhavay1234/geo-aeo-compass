@@ -169,10 +169,18 @@ function extractRawCitations(
   return out;
 }
 
+/** Stronger model driven via the Responses API + web_search tool (below). The
+ *  legacy gpt-4o-search-preview chat model gave vague, thinly-sourced answers;
+ *  the web_search tool lets a full model run real searches and cite specific
+ *  third-party pages. Kept as a constant so the fallback path is explicit. */
+const WEBSEARCH_MODEL = 'gpt-4.1';
+
 /**
- * Polls ChatGPT with a buyer-intent query.
- * Uses gpt-4o-search-preview which has built-in web search,
- * giving us responses closest to what users see on chat.openai.com.
+ * Polls ChatGPT with a buyer-intent query. PRIMARY path: OpenAI Responses API
+ * with the web_search tool on a full model (WEBSEARCH_MODEL) — grounded,
+ * specific answers with real url_citation annotations. Falls back to the legacy
+ * gpt-4o-search-preview chat model if the Responses call errors or comes back
+ * empty (e.g. model not enabled on the account), so ChatGPT never goes dark.
  */
 export async function pollChatGPT(
   query: string,
@@ -184,10 +192,121 @@ export async function pollChatGPT(
       citations: [],
       raw_citations: [],
       error: 'Missing OPENAI_API_KEY env var',
-      model_used: MODEL,
+      model_used: WEBSEARCH_MODEL,
     };
   }
+  try {
+    const r = await pollChatGPTWebSearch(query, env);
+    if (r.response_text || r.citations.length > 0) return r;
+    console.error('[openai] web_search empty — falling back to search-preview');
+  } catch (err: any) {
+    console.error('[openai] web_search failed — falling back:', err?.message);
+  }
+  return pollChatGPTSearchPreview(query, env);
+}
 
+/**
+ * PRIMARY ChatGPT path — OpenAI Responses API with the web_search tool. A full
+ * model decides its own searches, reads results, and cites specific pages via
+ * url_citation annotations (grounded). Answer text prefers the assembled
+ * message content, then the SDK's output_text convenience getter.
+ */
+async function pollChatGPTWebSearch(
+  query: string,
+  env: Env
+): Promise<OpenAIPollResult> {
+  const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+  const response = await pRetry(
+    async () => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const call = (openai as any).responses.create({
+          model: WEBSEARCH_MODEL,
+          tools: [{ type: 'web_search_preview' }],
+          instructions:
+            'Answer the buyer question by SEARCHING THE WEB and citing specific, ' +
+            'current third-party sources (comparison articles, review sites, ' +
+            'industry rankings). Name concrete products/vendors. Be specific and ' +
+            'grounded — never generic.',
+          input: query,
+        });
+        const timeout = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error('OpenAI responses timeout 40s')),
+            40000
+          );
+        });
+        return await Promise.race([call, timeout]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    },
+    { retries: 2, factor: 2, minTimeout: 1000, maxTimeout: 8000 }
+  );
+
+  const parsed = extractResponses(response);
+  return {
+    response_text: parsed.text,
+    citations: parsed.citations,
+    raw_citations: parsed.raw_citations,
+    model_used: `${WEBSEARCH_MODEL} (web_search)`,
+  };
+}
+
+/** Extract answer text + url_citation annotations from a Responses API result. */
+function extractResponses(response: any): {
+  text: string;
+  citations: RawCitation[];
+  raw_citations: RawInlineCitation[];
+} {
+  let text = '';
+  const citations: RawCitation[] = [];
+  const raw_citations: RawInlineCitation[] = [];
+  const seen = new Set<string>();
+  let order = 0;
+  const output = Array.isArray(response?.output) ? response.output : [];
+  for (const item of output) {
+    if (item?.type !== 'message' || !Array.isArray(item.content)) continue;
+    for (const c of item.content) {
+      if (typeof c?.text === 'string' && c.text.trim())
+        text += (text ? '\n\n' : '') + c.text;
+      const anns = Array.isArray(c?.annotations) ? c.annotations : [];
+      for (const a of anns) {
+        if (a?.type !== 'url_citation' || typeof a.url !== 'string') continue;
+        const url = a.url;
+        let domain = '';
+        try {
+          domain = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+        } catch {
+          /* skip unparseable */
+        }
+        const title = typeof a.title === 'string' ? a.title : '';
+        raw_citations.push({
+          order: order++,
+          url,
+          title,
+          domain,
+          start_index: typeof a.start_index === 'number' ? a.start_index : null,
+          end_index: typeof a.end_index === 'number' ? a.end_index : null,
+          anchor_text: '',
+          grounded: true,
+        });
+        if (!seen.has(url)) {
+          seen.add(url);
+          citations.push({ url, title, domain, grounded: true });
+        }
+      }
+    }
+  }
+  if (!text && typeof response?.output_text === 'string') text = response.output_text;
+  return { text, citations, raw_citations };
+}
+
+/** LEGACY fallback — gpt-4o-search-preview chat completion (built-in search). */
+async function pollChatGPTSearchPreview(
+  query: string,
+  env: Env
+): Promise<OpenAIPollResult> {
   try {
     const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
 

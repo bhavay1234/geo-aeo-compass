@@ -205,7 +205,73 @@ export async function pollGemini(
     ],
     env
   );
-  return normalize(data, 'gemini', 'gemini-2.5-flash');
+  return resolveGeminiProxies(normalize(data, 'gemini', 'gemini-2.5-flash'));
+}
+
+/**
+ * Gemini grounding wraps EVERY source in a vertexaisearch redirect proxy, so the
+ * raw poll citations have no real deep URL — the Queries tab could only show a
+ * domain homepage. Resolve the proxies HERE (at poll time) by following the
+ * redirect Location (manual, no body), so citations carry the real publisher
+ * URL everywhere. Bounded + best-effort: failures keep the proxy URL (the
+ * Citations stage still resolves those later).
+ */
+async function resolveGeminiProxies(norm: OpenAIPollResult): Promise<OpenAIPollResult> {
+  const PROXY_CAP = 30;
+  const proxyUrls = Array.from(
+    new Set(
+      norm.citations
+        .map((c) => c.url)
+        .filter((u) => u.includes('vertexaisearch.cloud.google.com'))
+    )
+  ).slice(0, PROXY_CAP);
+  if (proxyUrls.length === 0) return norm;
+
+  const pairs = await Promise.all(
+    proxyUrls.map(async (u) => [u, await resolveVertexRedirect(u)] as const)
+  );
+  const map = new Map<string, string>();
+  for (const [u, real] of pairs) if (real) map.set(u, real);
+  if (map.size === 0) return norm;
+
+  const fix = <T extends { url: string; domain: string }>(c: T): T => {
+    const real = map.get(c.url);
+    if (!real) return c;
+    let domain = c.domain;
+    try {
+      domain = new URL(real).hostname.replace(/^www\./, '').toLowerCase();
+    } catch {
+      /* keep title-derived domain */
+    }
+    return { ...c, url: real, domain };
+  };
+  norm.citations = norm.citations.map(fix);
+  norm.raw_citations = norm.raw_citations.map(fix);
+  return norm;
+}
+
+/** Follow a vertexaisearch proxy's redirect chain (manual, no body) to the real
+ *  publisher URL. Up to 3 hops, 4s per hop. Returns null if it can't resolve. */
+async function resolveVertexRedirect(url: string): Promise<string | null> {
+  let current = url;
+  for (let hop = 0; hop < 3; hop++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    try {
+      const res = await fetch(current, { method: 'GET', redirect: 'manual', signal: controller.signal });
+      const loc = res.headers.get('location');
+      if (!loc) break;
+      current = new URL(loc, current).toString();
+      if (!current.includes('vertexaisearch.cloud.google.com')) return current;
+    } catch {
+      break;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return current !== url && !current.includes('vertexaisearch.cloud.google.com')
+    ? current
+    : null;
 }
 
 /**

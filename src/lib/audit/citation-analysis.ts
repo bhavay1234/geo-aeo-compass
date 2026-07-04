@@ -431,7 +431,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     console.error('[citations] gemini resolve failed (non-fatal):', e?.message);
   }
 
-  const analysis: CitationAnalysisEntry[] = allUrls.map((url) => {
+  let analysis: CitationAnalysisEntry[] = allUrls.map((url) => {
     const meta = urlMeta.get(url)!;
     const page = pages.get(url);
     const presence = page
@@ -472,6 +472,57 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
       resolved_url,
     };
   });
+
+  // Merge entries that resolve to the SAME real destination. Gemini wraps every
+  // source in a unique vertexaisearch proxy, and redirects (/blog → /post) give
+  // the same page different `url` keys — so one page was landing as 2–3 separate
+  // single-LLM entries, undercounting the cross-LLM leverage signal (the
+  // universal-source ranking) and duplicating worklist rows. Key on the resolved
+  // destination (host + path, query/trailing-slash stripped), union LLMs +
+  // queries, and keep the real (non-proxy, alive) representative.
+  const destKey = (e: CitationAnalysisEntry): string => {
+    const raw = (e.resolved_url || e.url || '').toLowerCase();
+    try {
+      const u = new URL(raw);
+      return u.hostname.replace(/^www\./, '') + u.pathname.replace(/\/+$/, '');
+    } catch {
+      return raw;
+    }
+  };
+  const mergedByDest = new Map<string, CitationAnalysisEntry>();
+  const mergedQueries = new Map<string, Set<string>>();
+  for (const e of analysis) {
+    const k = destKey(e);
+    const qset = urlMeta.get(e.url)?.queries ?? new Set<string>();
+    const prev = mergedByDest.get(k);
+    if (!prev) {
+      mergedByDest.set(k, { ...e });
+      mergedQueries.set(k, new Set(qset));
+      continue;
+    }
+    const llms = new Set<string>([...prev.llms_citing, ...e.llms_citing]);
+    prev.llms_citing = Array.from(llms) as LlmSource[];
+    const mq = mergedQueries.get(k)!;
+    for (const q of qset) mq.add(q);
+    prev.query_count = mq.size;
+    prev.brand_present = prev.brand_present || e.brand_present;
+    if (prev.match_type === 'none' && e.match_type !== 'none') prev.match_type = e.match_type;
+    // Prefer a real (non-proxy) url as the representative key.
+    if (prev.url.includes('vertexaisearch') && !e.url.includes('vertexaisearch')) {
+      prev.url = e.url;
+      if (e.resolved_url) prev.resolved_url = e.resolved_url;
+    }
+    if (!prev.resolved_url && e.resolved_url) prev.resolved_url = e.resolved_url;
+    // Prefer a known-alive status over unknown/dead.
+    if (
+      e.status_code !== undefined &&
+      (prev.status_code === undefined || (e.status_code < 400 && prev.status_code >= 400))
+    ) {
+      prev.status_code = e.status_code;
+    }
+  }
+  analysis = Array.from(mergedByDest.values());
+
   // Rank by cross-LLM leverage first (# distinct LLMs citing), then breadth
   // across queries. A source cited by all LLMs is the universal opportunity.
   analysis.sort((a, b) => {
