@@ -443,12 +443,16 @@ const NICHE_SYSTEM =
   'software, a Reddit thread asking which freight/logistics tool to use. The ' +
   'competitor list is your anchor for whether the topic matches. If the topic ' +
   "plausibly overlaps the brand's space, relevant=TRUE.\n" +
-  'relevant=FALSE ONLY when the topic is a CLEARLY DIFFERENT category that merely ' +
-  'shares a word: stock/forex TRADING or investing; trade FINANCE (financing/' +
-  'payments); fleet dashcams / vehicle telematics; local last-mile ROUTE ' +
-  'optimization; HR / recruiting; generic AI or developer tutorials; B2B trading ' +
-  'marketplaces built to find suppliers (Alibaba / IndiaMART-style); pure news with ' +
-  'no participation angle; unrelated industries.\n' +
+  'relevant=FALSE when: (a) the item is a review/profile page for ONE specific ' +
+  'product (e.g. g2.com/products/<competitor>/reviews, a Capterra product profile, ' +
+  'a "review of <product>") — you CANNOT list yourself on a rival\'s own product ' +
+  'page; only CATEGORY/directory pages that rank MANY products (g2.com/categories/' +
+  'X, "best X software") count. (b) the topic is a CLEARLY DIFFERENT category that ' +
+  'merely shares a word: stock/forex TRADING or investing; trade FINANCE ' +
+  '(financing/payments); fleet dashcams / vehicle telematics; local last-mile ' +
+  'ROUTE optimization; HR / recruiting; generic AI or developer tutorials; B2B ' +
+  'trading marketplaces built to find suppliers (Alibaba / IndiaMART-style); pure ' +
+  'news with no participation angle; unrelated industries.\n' +
   'reason (ONLY when relevant; ONE specific sentence fitting the FORMAT: "get ' +
   'listed" for a roundup/directory, "get mentioned in this thread" for a forum/' +
   'post/Q&A, "get featured" for a video — name the topic + a named competitor that ' +
