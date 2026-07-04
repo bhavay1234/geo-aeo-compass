@@ -12,7 +12,7 @@ import { decisiveFactor, buildInfluenceFallback, type InfluenceSide } from './wh
 import {
   mapWithConcurrency,
   inferInfluenceVerdict,
-  classifyNicheRelevance,
+  judgeGetListedSources,
 } from '../llm/suggestions';
 import type {
   Citation,
@@ -459,7 +459,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     );
     const brandDna = (audit as { brand_dna?: { products?: string[] } }).brand_dna;
     try {
-      const verdicts = await classifyNicheRelevance(
+      const verdicts = await judgeGetListedSources(
         {
           brandName: you,
           category: (audit.category as string | null) || '',
@@ -474,10 +474,11 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
         env
       );
       contentEntries.forEach((e, i) => {
-        e.niche_relevant = verdicts[i];
+        e.niche_relevant = verdicts[i].relevant;
+        if (verdicts[i].reason) e.get_listed_reason = verdicts[i].reason;
       });
     } catch (err: any) {
-      console.error('[citations] niche classify failed (non-fatal):', err?.message);
+      console.error('[citations] get-listed judge failed (non-fatal):', err?.message);
     }
   }
 

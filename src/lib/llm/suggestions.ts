@@ -431,28 +431,36 @@ export async function classifyCompetitors(
 }
 
 const NICHE_SYSTEM =
-  'You decide which cited ARTICLES/LISTS are genuinely in the audited brand\'s ' +
-  'category — "best/top X" roundups, directories, comparison or "vs" posts, or ' +
-  'videos where THIS brand would naturally be listed alongside its competitors. ' +
-  'You are given the brand (name, category, positioning), the brands it COMPETES ' +
-  'WITH, and a numbered list of items (title + url). A list is in-niche ONLY if ' +
-  'the brand AND brands like its named competitors would plausibly appear in it. ' +
-  'Judge by MEANING, not shared words. Be STRICT — EXCLUDE adjacent-but-different ' +
-  'categories that merely share a keyword: e.g. trade FINANCE / customs paperwork ' +
-  'vs global TRADE software, stock/forex TRADING vs trade compliance, local fleet ' +
-  'ROUTE-optimization / last-mile vs freight visibility, HR, generic AI/developer ' +
-  'tutorials, and unrelated industries. When unsure, EXCLUDE. Return ONLY JSON ' +
-  '{"relevant":[indices]}.';
+  'You are an AEO strategist. For each cited ARTICLE/LIST/VIDEO, decide if it is a ' +
+  'place the audited brand should GET LISTED — a "best/top X" roundup, directory, ' +
+  'comparison/"vs" post, or video genuinely in the brand\'s category, where the ' +
+  'brand AND brands like its named competitors would plausibly appear. Judge by ' +
+  'MEANING, not shared words. Be STRICT: mark relevant=false for adjacent-but-' +
+  'different categories that merely share a keyword (e.g. trade FINANCE / customs ' +
+  'paperwork vs global TRADE software; stock/forex TRADING vs trade compliance; ' +
+  'local fleet ROUTE-optimization / last-mile vs freight visibility; HR; generic ' +
+  'AI/developer tutorials; unrelated industries). When unsure, relevant=false.\n' +
+  'For each RELEVANT item also give "reason": ONE short, concrete sentence on why ' +
+  'getting THIS brand listed here would improve its AI-answer visibility — specific ' +
+  'to the list\'s topic/audience (e.g. "A freight-visibility roundup ChatGPT pulls ' +
+  'from for \'best real-time tracking\' — being listed puts you in that answer."). ' +
+  'For irrelevant items, reason "". Return ONLY JSON: ' +
+  '{"items":[{"i":number,"relevant":boolean,"reason":string}]}.';
+
+export interface GetListedVerdict {
+  relevant: boolean;
+  reason: string;
+}
 
 /**
- * Judge which cited articles/lists are genuinely in the brand's niche —
- * semantic, anchored on the brand's real competitors, so it separates "global
- * trade software" from "trade finance", stock "trading", or fleet "route
- * optimization". Batched (≤50/call). Returns a boolean per input item (true =
- * in-niche / keep). On no key / failure returns all-true so nothing is wrongly
- * hidden.
+ * For each cited content source: is it a place the brand should get listed, and
+ * if so WHY (one line). Semantic + competitor-anchored, so it separates "global
+ * trade software" from "trade finance" / stock "trading" / fleet "route
+ * optimization" — and asking for a concrete reason forces out the off-niche ones.
+ * Batched (≤25/call, gpt-4o-mini). Returns a verdict per input item. On no key /
+ * failure returns relevant=true with no reason so nothing is wrongly hidden.
  */
-export async function classifyNicheRelevance(
+export async function judgeGetListedSources(
   input: {
     brandName: string;
     category: string;
@@ -462,11 +470,11 @@ export async function classifyNicheRelevance(
     items: Array<{ title: string; url: string }>;
   },
   env: Env
-): Promise<boolean[]> {
-  const out = new Array<boolean>(input.items.length).fill(true);
+): Promise<GetListedVerdict[]> {
+  const out: GetListedVerdict[] = input.items.map(() => ({ relevant: true, reason: '' }));
   if (!env.OPENAI_API_KEY || input.items.length === 0) return out;
   const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
-  const BATCH = 50;
+  const BATCH = 25;
   for (let start = 0; start < input.items.length; start += BATCH) {
     const batch = input.items.slice(start, start + BATCH);
     const user = JSON.stringify({
@@ -475,35 +483,40 @@ export async function classifyNicheRelevance(
       positioning: input.positioning.slice(0, 240),
       competes_with: (input.competitors ?? []).slice(0, 12),
       products: (input.products ?? []).slice(0, 6),
-      articles: batch.map((it, i) => ({ i, title: it.title.slice(0, 140), url: it.url.slice(0, 160) })),
+      items: batch.map((it, i) => ({ i, title: it.title.slice(0, 140), url: it.url.slice(0, 160) })),
     });
     try {
       const completion = await withTimeout(
         openai.chat.completions.create({
-          model: MODEL,
-          temperature: 0.1,
-          max_tokens: 500,
+          model: MODEL, // gpt-4o-mini — OpenAI's low-cost tier
+          temperature: 0.2,
+          max_tokens: 900,
           messages: [
             { role: 'system', content: NICHE_SYSTEM },
             { role: 'user', content: user },
           ],
         }),
-        15000
+        20000
       );
       const parsed = JSON.parse(
         stripFences(completion.choices[0]?.message?.content || '')
-      ) as { relevant?: unknown };
-      const rel = new Set(
-        Array.isArray(parsed.relevant)
-          ? (parsed.relevant as unknown[]).filter((n): n is number => typeof n === 'number')
-          : []
-      );
-      // Default to EXCLUDE within a successfully-judged batch (the model returns
-      // only the in-niche indices); a parse/HTTP failure below keeps all (true).
-      for (let i = 0; i < batch.length; i++) out[start + i] = rel.has(i);
+      ) as { items?: unknown };
+      // Default within a successfully-parsed batch: EXCLUDE unless the model
+      // returned an entry marking it relevant.
+      if (Array.isArray(parsed.items)) {
+        for (let i = 0; i < batch.length; i++) out[start + i] = { relevant: false, reason: '' };
+        for (const it of parsed.items as unknown[]) {
+          const o = it as { i?: unknown; relevant?: unknown; reason?: unknown };
+          if (typeof o.i !== 'number' || o.i < 0 || o.i >= batch.length) continue;
+          out[start + o.i] = {
+            relevant: o.relevant === true,
+            reason: typeof o.reason === 'string' ? o.reason.trim() : '',
+          };
+        }
+      }
     } catch (err: any) {
-      console.error('[niche-relevance] batch failed (keeping all):', err?.message);
-      // leave this batch's entries as true (keep)
+      console.error('[get-listed] batch failed (keeping all):', err?.message);
+      // leave this batch as relevant=true / no reason
     }
   }
   return out;

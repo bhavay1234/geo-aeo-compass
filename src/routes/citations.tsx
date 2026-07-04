@@ -72,12 +72,14 @@ function Row({
   llmCount,
   title,
   query,
+  reason,
 }: {
   e: CitationAnalysisEntry;
   rank: number;
   llmCount: number;
   title: string;
   query?: string;
+  reason?: string;
 }) {
   const k = KIND[e.source_type] ?? KIND.other;
   const citingCount = (e.llms_citing ?? []).length || 1;
@@ -162,6 +164,11 @@ function Row({
           {query && (
             <div style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 2 }}>
               ↳ answers: <span style={{ color: "var(--ink-2)" }}>{query}</span>
+            </div>
+          )}
+          {reason && (
+            <div style={{ fontSize: 11, color: "var(--ink-2)", marginTop: 4, fontStyle: "italic" }}>
+              Why list here: {reason}
             </div>
           )}
         </div>
@@ -486,6 +493,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
                 llmCount={llmCount}
                 title={titleByUrl.get(e.url) ?? ""}
                 query={queryFor(e.url)}
+                reason={e.get_listed_reason}
               />
             ))}
           </div>
@@ -652,6 +660,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
                 llmCount={llmCount}
                 title={`${titleByUrl.get(e.url) || e.domain}  ·  ${label}`}
                 query={queryFor(e.url)}
+                reason={e.get_listed_reason}
               />
             ))}
           </div>
@@ -685,6 +694,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
                 ACTION[key] ? ` → ${ACTION[key]}` : ""
               }`}
               query={queryFor(e.url)}
+              reason={e.get_listed_reason}
             />
           ))}
         </div>

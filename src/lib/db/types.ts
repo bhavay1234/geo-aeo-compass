@@ -168,6 +168,9 @@ export interface CitationAnalysisEntry {
    *  brand's actual niche (vs merely sharing a word — "trade finance" / stock
    *  "trading" for a supply-chain brand)? Absent = not judged (kept). */
   niche_relevant?: boolean;
+  /** One-line LLM reason WHY getting this brand listed here would help its AI
+   *  visibility. Empty/absent for off-niche or unjudged sources. */
+  get_listed_reason?: string;
 }
 
 /** Which of the three influence factors most likely drove a naming. */
