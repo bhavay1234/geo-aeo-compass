@@ -4,9 +4,10 @@
  * configured (the LLM extraction in generateQuerySuggestion is skipped).
  *
  * "Best X software" answers are heavily markdown-formatted; the recommended
- * products almost always appear as **bold spans** or ### headings. Conservative
- * by design: only those two signals, heavily filtered, so we never invent a
- * competitor out of body text.
+ * products almost always appear as **bold spans** or ### headings. But generic
+ * EDUCATIONAL answers ("what is integrated logistics IT?") bold CATEGORY terms
+ * and section headings ("WMS (Warehouse Management System)", "Core idea") — we
+ * must never mistake those for vendor brands. isBrandLike() is the gate.
  */
 
 const GENERIC = new Set([
@@ -20,7 +21,41 @@ const GENERIC = new Set([
   'key takeaways', 'bottom line', 'who', 'when', 'where', 'highlights',
   'limitations', 'pricing & plans', 'pricing and plans', 'best for',
   'standout features', 'drawbacks', 'why we picked it', 'quick comparison',
+  'core idea', 'key components', 'how it works', 'in practice',
 ]);
+
+// Generic software-category acronyms — categories, never brands.
+const CATEGORY_ACRONYM =
+  /^(erp|wms|tms|oms|crm|scm|aps|esi|plm|hcm|hrm|ipaas|paas|saas|api|apis|ai|ml|rpa|iot|edi|b2b|b2c|kpi|kpis|roi|sku|3pl|4pl|ocr|nlp|llm|sdk|ui|ux)$/i;
+
+// Trailing generic descriptors that mark a CATEGORY, not a product name.
+const CATEGORY_TAIL =
+  /\b(system|systems|software|platform|platforms|solution|solutions|planning|management|middleware|tool|tools|suite|services|service|technologies|technology|ecosystems?|capabilities|analytics|integration|automation|infrastructure|frameworks?|modules?|tracking|visibility|optimization|intelligence|reporting|forecasting|orchestration|monitoring|procurement|fulfillment|dashboards?)$/i;
+
+// Section-heading / non-noun openers.
+const HEADING_START =
+  /^(how|why|what|when|where|which|key|core|advanced|example|examples|getting|benefit|benefits|overview|understanding|choosing|comparing|top|best|pros|cons|note|summary|conclusion|introduction|modern|typical|common|popular|leading|other|additional|main|basic|general)\b/i;
+
+/**
+ * True only for strings that plausibly name a real product/vendor — short,
+ * capitalized, not a category acronym / descriptor / heading. Shared with the
+ * UI so category junk from OLD audits is filtered at read time too.
+ */
+export function isBrandLike(raw: string): boolean {
+  const n = (raw || '').trim();
+  if (n.length < 2 || n.length > 30) return false;
+  const words = n.split(/\s+/);
+  if (words.length > 4) return false; // brands are 1-4 words
+  if (/[()/[\]{}]/.test(n)) return false; // parens/slashes = acronym gloss / category
+  if (/^\d/.test(n) && !/[a-z]/i.test(n)) return false; // pure numbers
+  if (!/^[A-Za-z0-9]/.test(n)) return false;
+  const low = n.toLowerCase();
+  if (GENERIC.has(low)) return false;
+  if (CATEGORY_ACRONYM.test(n)) return false;
+  if (CATEGORY_TAIL.test(n)) return false;
+  if (HEADING_START.test(n)) return false;
+  return true;
+}
 
 export function extractProseBrands(text: string, ownName: string): string[] {
   if (!text) return [];
@@ -35,13 +70,9 @@ export function extractProseBrands(text: string, ownName: string): string[] {
     n = n.split(/\s+[–—-]\s+/)[0].split(/:\s/)[0].trim();
     n = n.replace(/[.,;:!?]+$/, '').trim();
     const low = n.toLowerCase();
-    if (n.length < 2 || n.length > 40) return;
     // Exclude the audited brand AND its product variants ("HubSpot CRM").
     if (low === own || (own && low.startsWith(own + ' '))) return;
-    if (GENERIC.has(low)) return;
-    if (!/^[A-Z0-9]/.test(n)) return; // proper names start upper/numeric
-    if (n.split(/\s+/).length > 5) return; // not a sentence fragment
-    if (/^\d+[.)]?$/.test(n)) return; // bare list numbers
+    if (!isBrandLike(n)) return;
     if (!found.has(low)) found.set(low, n);
   };
 
