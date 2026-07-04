@@ -431,20 +431,27 @@ export async function classifyCompetitors(
 }
 
 const NICHE_SYSTEM =
-  'You are an AEO strategist. For each cited ARTICLE/LIST/VIDEO, decide if it is a ' +
-  'place the audited brand should GET LISTED — a "best/top X" roundup, directory, ' +
-  'comparison/"vs" post, or video genuinely in the brand\'s category, where the ' +
-  'brand AND brands like its named competitors would plausibly appear. Judge by ' +
-  'MEANING, not shared words. Be STRICT: mark relevant=false for adjacent-but-' +
-  'different categories that merely share a keyword (e.g. trade FINANCE / customs ' +
-  'paperwork vs global TRADE software; stock/forex TRADING vs trade compliance; ' +
-  'local fleet ROUTE-optimization / last-mile vs freight visibility; HR; generic ' +
-  'AI/developer tutorials; unrelated industries). When unsure, relevant=false.\n' +
-  'For each RELEVANT item also give "reason": ONE short, concrete sentence on why ' +
-  'getting THIS brand listed here would improve its AI-answer visibility — specific ' +
-  'to the list\'s topic/audience (e.g. "A freight-visibility roundup ChatGPT pulls ' +
-  'from for \'best real-time tracking\' — being listed puts you in that answer."). ' +
-  'For irrelevant items, reason "". Return ONLY JSON: ' +
+  'You are a ruthless AEO strategist deciding where a brand should GET LISTED so it ' +
+  'appears in AI answers. For each cited item (title + url) return ' +
+  '{i, relevant, reason}.\n' +
+  'relevant=TRUE ONLY if the item is a "best/top X" roundup, a software directory/' +
+  'category page, or a product comparison that ranks PRODUCTS OF THE SAME TYPE as ' +
+  'the brand — such that the brand AND the named competitors would realistically ' +
+  'appear in it. The competitor list is your ANCHOR: if brands like those would NOT ' +
+  'be in it, relevant=false.\n' +
+  'relevant=FALSE for: news / opinion / analysis / feature articles (not a place ' +
+  'you can be listed); reviews of a DIFFERENT product or a different sub-category ' +
+  '(e.g. fleet dashcams / telematics for a freight-visibility brand); B2B trading ' +
+  'marketplaces or buyer directories built for a different purpose (e.g. Alibaba / ' +
+  'IndiaMART-style import-export marketplaces vs logistics software); how-to / ' +
+  'educational / glossary posts; vendor blogs about a neighboring category; and ' +
+  'anything only loosely related by a shared word (trade FINANCE, stock TRADING, ' +
+  'HR, dev tutorials). When unsure, relevant=FALSE.\n' +
+  'reason (ONLY when relevant; ONE sentence; SPECIFIC — never generic filler like ' +
+  '"relevant to the brand\'s audience/offerings"): name WHAT the list ranks, WHICH ' +
+  'named competitor is (or would be) in it, and the concrete visibility gain. If ' +
+  'you cannot name a specific, competitor-anchored reason, set relevant=false and ' +
+  'reason "". Vary wording across items. Return ONLY JSON: ' +
   '{"items":[{"i":number,"relevant":boolean,"reason":string}]}.';
 
 export interface GetListedVerdict {

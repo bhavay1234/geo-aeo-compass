@@ -340,10 +340,10 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   const actionableRaw = groups.filter((g) => ACTIONABLE.has(g.key));
   // Keep DEEP pages only; for listicles, also require niche relevance (drop the
   // vague off-topic roundups). Recount after filtering.
-  // In-niche? Server LLM verdict wins (any content surface). Reviews/directories
-  // are inherently in-niche. Keyword fallback only for listicles on old audits.
+  // In-niche? The server LLM verdict wins for every content surface (incl.
+  // reviews — techradar hosts off-niche reviews/news). Keyword fallback only for
+  // listicles on pre-classifier audits.
   const nicheOk = (g: (typeof groups)[number], e: CitationAnalysisEntry): boolean => {
-    if (g.key === "reviews") return true;
     if (typeof e.niche_relevant === "boolean") return e.niche_relevant;
     return g.key === "listicles" ? isNicheRelevantKeyword(e) : true;
   };

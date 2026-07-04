@@ -445,7 +445,9 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   // Judge every get-listable CONTENT surface (roundups, editorial, videos, social,
   // community) — not vendor/competitor/review-directory pages, which are inherently
   // in-niche or handled elsewhere. Anchored on the brand's real competitors.
-  const JUDGE_CATS = new Set(['listicles', 'editorial', 'youtube', 'community', 'reddit', 'linkedin', 'pr']);
+  const JUDGE_CATS = new Set([
+    'listicles', 'editorial', 'youtube', 'community', 'reddit', 'linkedin', 'pr', 'reviews',
+  ]);
   const contentEntries = analysis.filter((e) =>
     JUDGE_CATS.has(citationCategory(e.resolved_url || e.url, e.domain, e.source_type, competitorDomains))
   );
