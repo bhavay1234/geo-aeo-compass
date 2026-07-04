@@ -161,6 +161,7 @@ export async function processQueueBatch(
           title: c.title,
           domain: c.domain,
           source_type: classify(c.domain),
+          grounded: c.grounded,
         }));
 
         // Faithful inline trail — ordered, un-deduped, anchor text + source_type.

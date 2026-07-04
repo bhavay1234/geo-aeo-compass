@@ -7,6 +7,10 @@ export interface RawCitation {
   url: string;
   title: string;
   domain: string;
+  /** True = from the model's real web-search sources; false = mined from inline
+   *  markdown links in an ungrounded answer (a recommended product's own
+   *  homepage, not a third-party source). */
+  grounded?: boolean;
 }
 
 /**
@@ -23,6 +27,8 @@ export interface RawInlineCitation {
   start_index: number | null;
   end_index: number | null;
   anchor_text: string;
+  /** See RawCitation.grounded. */
+  grounded?: boolean;
 }
 
 export interface OpenAIPollResult {
@@ -103,7 +109,7 @@ function extractCitations(annotations: unknown): RawCitation[] {
       if (!url || seen.has(url)) continue;
       seen.add(url);
       const domain = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
-      out.push({ url, title: a.url_citation?.title || '', domain });
+      out.push({ url, title: a.url_citation?.title || '', domain, grounded: true });
     } catch {
       // malformed citation — skip, never throw
     }
@@ -154,6 +160,7 @@ function extractRawCitations(
         start_index,
         end_index,
         anchor_text: computeAnchorText(text, start_index, end_index),
+        grounded: true,
       });
     } catch {
       // malformed citation — skip, never throw

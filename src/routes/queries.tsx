@@ -13,7 +13,7 @@ import {
   normalizeLlm,
   type QueryState,
 } from "@/components/terminal/derive";
-import { normalizeDomain } from "@/lib/audit/source-classifier";
+import { normalizeDomain, citationCategory } from "@/lib/audit/source-classifier";
 import type {
   Audit,
   PollResult,
@@ -542,6 +542,38 @@ function QueryRow({
   );
 }
 
+/** True when a URL points at a site's root ("/", or empty path) — a homepage,
+ *  not a deep article/listicle/review page. Query string + hash ignored. */
+function isHomepageUrl(url: string): boolean {
+  try {
+    const p = new URL(url).pathname.replace(/\/+$/, "");
+    return p === "";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when a cited URL is a RECOMMENDATION self-cite — the model naming a
+ * product and linking its own site — rather than a third-party source you could
+ * get listed on. This is the root cause of "homepages coming as sources": when
+ * ChatGPT answers WITHOUT web grounding, DFS returns no `annotations`, so we mine
+ * the prose's markdown links, which are the recommended products' homepages.
+ *
+ * Uses the authoritative `grounded` flag when present. On legacy rows (flag
+ * absent) it stays deliberately conservative — only a product/company HOMEPAGE
+ * is hidden; reviews, editorial, forums, and any deep third-party page always
+ * survive — so we never nuke a real source we can't prove is ungrounded.
+ */
+function isRecommendationSelfCite(c: Citation): boolean {
+  if (c.grounded === true) return false; // real web-search source
+  if (c.grounded === false) return true; // authoritative: ungrounded prose link
+  // Legacy (no flag): hide only a plain product/company homepage.
+  const cat = citationCategory(c.url, c.domain, c.source_type);
+  if (cat !== "vendor" && cat !== "competitor") return false;
+  return isHomepageUrl(c.url);
+}
+
 /** One LLM's answer + influence + sources for the expanded query row. */
 function PollBody({
   poll,
@@ -558,10 +590,26 @@ function PollBody({
 }) {
   const llmName = LLM_LABEL[llm];
   const citations = (poll.citations ?? []) as Citation[];
-  const ordered =
+  const orderedRaw =
     poll.raw_citations && poll.raw_citations.length > 0
       ? [...poll.raw_citations].sort((a, b) => a.order - b.order)
       : citations.map((c, i) => ({ ...c, order: i, anchor_text: "" }));
+  // Dedup by URL — the same source (e.g. a product's homepage that heads several
+  // recommendation blocks) can appear many times in the inline trail; showing it
+  // once is the honest count.
+  const seenUrl = new Set<string>();
+  const orderedAll = orderedRaw.filter((c) => {
+    if (!c.url || seenUrl.has(c.url)) return false;
+    seenUrl.add(c.url);
+    return true;
+  });
+  // Split real third-party sources from recommendation self-cites (the model
+  // linking a product it recommends to its own homepage — not a source you can
+  // get listed on).
+  const ordered = orderedAll.filter(
+    (c) => !isRecommendationSelfCite(c as Citation)
+  );
+  const selfCiteCount = orderedAll.length - ordered.length;
 
   const competitorJudged = new Set(
     (poll.citation_roles ?? [])
@@ -668,11 +716,22 @@ function PollBody({
           </div>
         )}
 
-        {/* Panel 2: where this LLM sourced its answer — the "get listed" signal. */}
-        <div className="lbl">Where {llmName} sourced this · {ordered.length}</div>
+        {/* Panel 2: where this LLM sourced its answer — the "get listed" signal.
+            Only THIRD-PARTY sources count; recommendation homepages are excluded
+            (they're the products above, not pages you can get listed on). */}
+        <div className="lbl">
+          Where {llmName} sourced this · {ordered.length}
+          {selfCiteCount > 0 && (
+            <small style={{ marginLeft: 6, fontWeight: 600, color: "var(--ink-3)" }}>
+              · {selfCiteCount} recommendation homepage{selfCiteCount > 1 ? "s" : ""} hidden
+            </small>
+          )}
+        </div>
         {ordered.length === 0 ? (
           <p style={{ fontSize: 12, color: "var(--ink-3)" }}>
-            No live sources — answered from training.
+            {selfCiteCount > 0
+              ? `No third-party sources — ${llmName} answered from model knowledge and only linked the recommended products' own sites (shown above). To surface here you need third-party coverage — listicles, reviews, editorial — not a homepage.`
+              : "No live sources — answered from training."}
           </p>
         ) : (
           ordered.map((c, i) => {

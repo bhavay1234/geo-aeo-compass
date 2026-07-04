@@ -299,8 +299,14 @@ function normalize(
 
   const extracted = extractFromItems(items);
   const response_text = extracted.text;
-  const references =
-    extracted.refs.length > 0 ? extracted.refs : refsFromMarkdown(response_text);
+  // Real web-search sources arrive as structured `annotations` (extracted.refs).
+  // When that array is empty the model answered WITHOUT grounding — so any links
+  // in the prose are recommended products' own homepages, not third-party
+  // sources. We still surface them (mined from markdown) but flag them
+  // `grounded: false` so the UI can present them as recommendations, not "where
+  // the answer was sourced".
+  const grounded = extracted.refs.length > 0;
+  const references = grounded ? extracted.refs : refsFromMarkdown(response_text);
 
   const citations: RawCitation[] = [];
   const raw_citations: RawInlineCitation[] = [];
@@ -319,10 +325,11 @@ function normalize(
       start_index: null,
       end_index: null,
       anchor_text: '',
+      grounded,
     });
     if (!seen.has(url)) {
       seen.add(url);
-      citations.push({ url, title, domain });
+      citations.push({ url, title, domain, grounded });
     }
   });
 

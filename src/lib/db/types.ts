@@ -46,6 +46,12 @@ export interface Citation {
   title: string;
   domain: string;
   source_type: SourceType;
+  /** True when the URL came from the LLM's real web-search sources
+   *  (DFS `annotations` / OpenAI url_citations). False when it was mined from
+   *  inline markdown links in an UNGROUNDED answer — i.e. the model listed a
+   *  recommended product and linked its own homepage, not a third-party source.
+   *  Absent on legacy rows (predates the flag). */
+  grounded?: boolean;
 }
 
 /**
@@ -62,6 +68,8 @@ export interface InlineCitation {
   start_index: number | null;
   end_index: number | null;
   anchor_text: string;
+  /** See Citation.grounded. */
+  grounded?: boolean;
 }
 
 export type SuggestionSituation =
