@@ -196,16 +196,13 @@ function escapeRe(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Highlight the verbatim answer: brand in --you, competitors in --neg. */
-function highlightAnswer(
-  text: string,
-  brand: string,
-  compNames: string[]
-): ReactNode[] {
-  const terms: { term: string; cls: "me" | "comp" }[] = [];
+type HlTerm = { term: string; cls: "me" | "comp" };
+
+function buildTerms(brand: string, compNames: string[]): HlTerm[] {
+  const terms: HlTerm[] = [];
   const seen = new Set<string>();
   const add = (term: string, cls: "me" | "comp") => {
-    const t = term.trim();
+    const t = (term || "").trim();
     const k = t.toLowerCase();
     if (t && !seen.has(k)) {
       seen.add(k);
@@ -214,9 +211,14 @@ function highlightAnswer(
   };
   add(brand, "me");
   for (const c of compNames) add(c, "comp");
-  if (terms.length === 0) return [text];
-
   terms.sort((a, b) => b.term.length - a.term.length);
+  return terms;
+}
+
+/** Highlight brand/competitor names within a plain text run. */
+function highlightInline(text: string, terms: HlTerm[], kb: string): ReactNode[] {
+  if (!text) return [];
+  if (terms.length === 0) return [text];
   const re = new RegExp(`\\b(${terms.map((t) => escapeRe(t.term)).join("|")})\\b`, "gi");
   const out: ReactNode[] = [];
   let last = 0;
@@ -226,10 +228,9 @@ function highlightAnswer(
     if (m.index > last) out.push(text.slice(last, m.index));
     const matched = m[0];
     const cls =
-      terms.find((t) => t.term.toLowerCase() === matched.toLowerCase())?.cls ??
-      "comp";
+      terms.find((t) => t.term.toLowerCase() === matched.toLowerCase())?.cls ?? "comp";
     out.push(
-      <span key={key++} className={cls}>
+      <span key={`${kb}-${key++}`} className={cls}>
         {matched}
       </span>
     );
@@ -237,6 +238,69 @@ function highlightAnswer(
   }
   if (last < text.length) out.push(text.slice(last));
   return out;
+}
+
+/** Inline markdown (**bold**) + brand/competitor highlighting for one text run. */
+function renderInline(text: string, terms: HlTerm[], kb: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  text.split(/(\*\*[^*]+\*\*)/g).forEach((part, i) => {
+    if (!part) return;
+    if (/^\*\*[^*]+\*\*$/.test(part)) {
+      const inner = part.slice(2, -2);
+      out.push(<strong key={`${kb}-b${i}`}>{highlightInline(inner, terms, `${kb}-b${i}`)}</strong>);
+    } else {
+      out.push(...highlightInline(part, terms, `${kb}-t${i}`));
+    }
+  });
+  return out;
+}
+
+/**
+ * Render the verbatim answer with light formatting: strips inline citation
+ * markers ("[1]", "[3][4]"), renders **bold** and bullet/numbered lists, and
+ * highlights the brand (--you) and competitors (--neg). LLM answers are
+ * markdown — showing it raw made the panel look broken.
+ */
+function renderRichAnswer(text: string, brand: string, compNames: string[]): ReactNode {
+  const terms = buildTerms(brand, compNames);
+  const cleaned = (text || "").replace(/\s*\[\d+\](?:\s*\[\d+\])*/g, "");
+  const lines = cleaned.split(/\n/);
+  const blocks: ReactNode[] = [];
+  let li: ReactNode[] = [];
+  const flush = (k: number) => {
+    if (li.length) {
+      blocks.push(
+        <ul key={`ul-${k}`} style={{ margin: "4px 0 10px", paddingLeft: 18 }}>
+          {li}
+        </ul>
+      );
+      li = [];
+    }
+  };
+  lines.forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) {
+      flush(i);
+      return;
+    }
+    const b = line.match(/^(?:[-*•]|\d+\.)\s+(.*)$/);
+    if (b) {
+      li.push(
+        <li key={`li-${i}`} style={{ marginBottom: 3 }}>
+          {renderInline(b[1], terms, `li-${i}`)}
+        </li>
+      );
+    } else {
+      flush(i);
+      blocks.push(
+        <p key={`p-${i}`} style={{ margin: "0 0 8px" }}>
+          {renderInline(line, terms, `p-${i}`)}
+        </p>
+      );
+    }
+  });
+  flush(lines.length);
+  return <>{blocks}</>;
 }
 
 interface QueryGroup {
@@ -700,6 +764,17 @@ function PollBody({
       .map((r) => normalizeDomain(r.domain))
   );
 
+  // Two different presence signals — the source of the "I'm present, why
+  // suggestions?" confusion. namedInAnswer = the brand appears in the prose
+  // (the tab ✓). ownCited = the brand's OWN site is in the cited sources rail.
+  // You can be named but not cited — the worklist is about getting CITED.
+  const namedInAnswer = poll.brand_cited;
+  const ownCited = (poll.citations ?? []).some(
+    (c) =>
+      c.source_type === "own" ||
+      (!!ownNorm && normalizeDomain(c.domain) === ownNorm)
+  );
+
   const recentlyCompleted =
     !!audit.completed_at &&
     Date.now() - new Date(audit.completed_at).getTime() < 5 * 60_000;
@@ -730,22 +805,45 @@ function PollBody({
         </div>
         <div className="txt">
           {poll.full_response
-            ? highlightAnswer(poll.full_response, audit.brand_name, compNames)
+            ? renderRichAnswer(poll.full_response, audit.brand_name, compNames)
             : poll.raw_response || "No answer text stored."}
           {!poll.brand_cited && (
-            <>
-              {" "}
-              <span className="tm-none">
-                ⚑ {audit.brand_name} not mentioned in this answer
-              </span>
-            </>
+            <span className="tm-none">
+              ⚑ {audit.brand_name} not mentioned in this answer
+            </span>
           )}
         </div>
+
+        {/* When the brand IS named but NOT cited in sources, say so — otherwise
+            "and not you" contradicts the ✓ and confuses the reader. */}
+        {namedInAnswer && !ownCited && (
+          <div
+            style={{
+              marginTop: 16,
+              padding: "8px 10px",
+              borderRadius: 4,
+              background: "var(--panel-2)",
+              fontSize: 12,
+              color: "var(--ink-2)",
+              lineHeight: 1.5,
+            }}
+          >
+            ✓ <b>{audit.brand_name} is named in this answer</b> — but your site
+            isn't among the <b>cited sources</b> it's built from. The competitors
+            below <em>are</em> cited in third-party pages, which is what makes them
+            consistently recommended. Getting cited on those pages defends your
+            spot.
+          </div>
+        )}
 
         {/* Why the LLM NAMED these brands — led by which cited sources name them. */}
         {poll.why_cited && poll.why_cited.length > 0 ? (
           <div style={{ marginTop: 20 }}>
-            <div className="lbl">Why {llmName} named these — and not you</div>
+            <div className="lbl">
+              {namedInAnswer
+                ? `Why ${llmName} cites these competitors in its sources`
+                : `Why ${llmName} named these — and not you`}
+            </div>
             {poll.why_cited.map((w, i) => (
               <InfluenceBlock key={i} w={w} you={poll.own_page} />
             ))}
@@ -768,8 +866,9 @@ function PollBody({
       </div>
       <div className="tm-srcs">
         {/* Panel 1: the competitor signal — brands NAMED in the prose. */}
-        <div className="lbl" style={{ color: "var(--hot)" }}>
-          Recommended instead of you · {recommended.length}
+        <div className="lbl" style={{ color: namedInAnswer ? "var(--ink-2)" : "var(--hot)" }}>
+          {namedInAnswer ? "Also recommended" : "Recommended instead of you"} ·{" "}
+          {recommended.length}
         </div>
         {recommended.length === 0 ? (
           <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 18 }}>
