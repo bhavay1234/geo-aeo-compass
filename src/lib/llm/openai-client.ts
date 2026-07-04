@@ -214,7 +214,9 @@ export async function pollChatGPT(
 async function pollChatGPTWebSearch(
   query: string,
   env: Env,
-  model: string = WEBSEARCH_MODEL
+  model: string = WEBSEARCH_MODEL,
+  timeoutMs: number = 90000,
+  retries: number = 1
 ): Promise<OpenAIPollResult> {
   const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
   const response = await pRetry(
@@ -233,8 +235,8 @@ async function pollChatGPTWebSearch(
         });
         const timeout = new Promise<never>((_, reject) => {
           timeoutId = setTimeout(
-            () => reject(new Error('OpenAI responses timeout 40s')),
-            40000
+            () => reject(new Error(`OpenAI responses timeout ${timeoutMs}ms`)),
+            timeoutMs
           );
         });
         return await Promise.race([call, timeout]);
@@ -242,7 +244,7 @@ async function pollChatGPTWebSearch(
         if (timeoutId) clearTimeout(timeoutId);
       }
     },
-    { retries: 2, factor: 2, minTimeout: 1000, maxTimeout: 8000 }
+    { retries, factor: 2, minTimeout: 1000, maxTimeout: 8000 }
   );
 
   const parsed = extractResponses(response);
@@ -263,7 +265,9 @@ export async function probeChatGPTModel(
 ): Promise<{ model: string; ok: boolean; citations: number; text_chars: number; error?: string }> {
   if (!env.OPENAI_API_KEY) return { model, ok: false, citations: 0, text_chars: 0, error: 'no key' };
   try {
-    const r = await pollChatGPTWebSearch(query, env, model);
+    // Single attempt, generous timeout — GPT-5.x web search is a slow reasoning
+    // call; retries would blow the relay window.
+    const r = await pollChatGPTWebSearch(query, env, model, 100000, 0);
     return {
       model,
       ok: !!(r.response_text || r.citations.length),
