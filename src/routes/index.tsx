@@ -46,6 +46,7 @@ function Index() {
   const [intent, setIntent] = useState<"transactional" | "general">("transactional");
   const [dna, setDna] = useState<DnaResponse["dna"] | null>(null);
   const [querySource, setQuerySource] = useState<"labs" | "llm" | null>(null);
+  const [pickedQueries, setPickedQueries] = useState<DnaResponse["queries"]>([]);
 
   const queryCount = splitLines(queries).length;
 
@@ -59,7 +60,13 @@ function Index() {
     onSuccess: (r) => {
       setDna(r.dna);
       setQuerySource(r.query_source);
+      setPickedQueries(r.queries);
       setBrandName(r.dna.brand_name);
+      // Auto-detected rivals prefill the Competitors field (own brand excluded).
+      const own = r.dna.brand_name.toLowerCase();
+      setCompetitors(
+        r.dna.competitors.filter((c) => c.toLowerCase() !== own).join(", ")
+      );
       setQueries(r.queries.map((q) => q.keyword).join("\n"));
     },
   });
@@ -137,7 +144,7 @@ function Index() {
             </p>
 
             {/* ① Auto-build from the website: scrape -> Brand DNA -> 20 queries
-                picked by DataForSEO search volume. Intent question REQUIRED
+                picked by real search volume. Intent question REQUIRED
                 before generation. */}
             <div
               style={{
@@ -222,9 +229,26 @@ function Index() {
                       </span>
                     ))}
                   </div>
+                  {pickedQueries.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 10 }}>
+                      {pickedQueries.slice(0, 20).map((q) => (
+                        <span key={q.keyword} className="tm-chip" title={q.intent}>
+                          {q.keyword}
+                          {querySource === "labs" && q.volume > 0 && (
+                            <b className="mono" style={{ marginLeft: 5, color: "var(--ink)" }}>
+                              {q.volume >= 1000
+                                ? `${Math.round(q.volume / 100) / 10}k`
+                                : q.volume}
+                              /mo
+                            </b>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <p className="mono" style={{ marginTop: 8, fontSize: 10.5, color: "var(--ink-3)" }}>
                     {querySource === "labs"
-                      ? "Queries picked by DataForSEO search volume — review/edit below, then run."
+                      ? "Queries ranked by real monthly search volume — review/edit below, then run."
                       : "Queries generated from the Brand DNA — review/edit below, then run."}
                   </p>
                 </div>

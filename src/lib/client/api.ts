@@ -45,6 +45,7 @@ export interface DnaResponse {
     positioning: string;
     category: string;
     products: string[];
+    competitors: string[];
     audience: string;
     seed_phrases: string[];
   };

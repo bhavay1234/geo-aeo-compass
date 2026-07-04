@@ -20,6 +20,8 @@ export interface BrandDna {
   positioning: string;
   category: string;
   products: string[];
+  /** Rival brands auto-detected from the model's knowledge of the domain. */
+  competitors: string[];
   audience: string;
   seed_phrases: string[];
 }
@@ -46,7 +48,8 @@ const DNA_SYSTEM =
   'content if useful, else your own knowledge of the company. Never refuse. ' +
   'Return ONLY valid JSON: {"brand_name":string,"positioning":string one ' +
   'sentence,"category":string 2-4 word buyer category,"products":string[] up ' +
-  'to 4,"audience":string short phrase,"seed_phrases":string[] exactly 5 ' +
+  'to 4,"competitors":string[] up to 4 rival brands,"audience":string short ' +
+  'phrase,"seed_phrases":string[] exactly 5 ' +
   'generic buyer search phrases for this category, never the brand name}';
 
 /** Scrape the homepage — Apify cheerio primary (per config), plain fetch fallback. */
@@ -88,7 +91,7 @@ const TRANSACTIONAL_INTENTS = new Set(['transactional', 'commercial']);
 // suggestions sometimes carry (live example: "hsbc global trade solutions
 // internship") — never buyer queries.
 const JUNK_WORDS =
-  /\b(internship|intern|jobs?|careers?|salary|salaries|hiring|login|log in|sign ?in|sign ?up|support|help ?desk|tutorial|course|certification|resume|cv)\b/i;
+  /\b(internship|intern|jobs?|careers?|salary|salaries|hiring|login|log in|sign ?in|sign ?up|support|help ?desk|tutorial|course|certification|resume|cv|acquires?|acquisition|merger|edition|textbook|book|pdf|syllabus|meaning|definition|gmbh|co kg|pvt ltd|wikipedia)\b/i;
 
 /**
  * Merge per-seed suggestions into the 20 most relevant queries:
@@ -173,6 +176,11 @@ export async function buildBrandDna(
     category: typeof parsed?.category === 'string' ? parsed.category : '',
     products: Array.isArray(parsed?.products)
       ? (parsed!.products as unknown[]).filter((p): p is string => typeof p === 'string').slice(0, 4)
+      : [],
+    competitors: Array.isArray(parsed?.competitors)
+      ? (parsed!.competitors as unknown[])
+          .filter((c): c is string => typeof c === 'string' && c.trim().length > 1)
+          .slice(0, 4)
       : [],
     audience: typeof parsed?.audience === 'string' ? parsed.audience : '',
     seed_phrases: Array.isArray(parsed?.seed_phrases)
