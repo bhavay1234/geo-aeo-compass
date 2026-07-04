@@ -235,10 +235,16 @@ const SUGGESTION_SYSTEM =
   'current answer/citations.\n' +
   '- Also judge EACH cited domain: is it a rival product/company (competitor) or a ' +
   'directory/review/editorial source (source)? Use "unsure" only if truly unclear.\n' +
-  '- Also list brands_named: the product/brand names ChatGPT NAMES IN THE PROSE as ' +
-  'answers or recommendations (the actual recommended products, e.g. "Acme Tracker"). ' +
-  'EXCLUDE the audited brand itself, and EXCLUDE publishers/review sites/aggregators/' +
-  'sources (those belong in citation_judgments, not here). Names exactly as written.\n' +
+  '- Also list brands_named: ONLY real, specifically-named PRODUCTS or COMPANIES ' +
+  'that genuinely COMPETE with the audited brand in the same category, presented ' +
+  'in the answer as options/recommendations (proper nouns, e.g. "FourKites", ' +
+  '"Salesforce"). A brand qualifies only if a buyer could choose it INSTEAD of the ' +
+  'audited brand. STRICTLY EXCLUDE, returning none of: generic software categories ' +
+  'or their acronyms (e.g. "CRM", "WMS", "TMS", "ERP", "warehouse management ' +
+  'system", "supply chain visibility"); features or capabilities; section headings; ' +
+  'the audited brand itself; and publishers/review sites/aggregators/sources (those ' +
+  'go in citation_judgments). If the answer is generic/educational and names no real ' +
+  'competing product, return []. Names exactly as written.\n' +
   'Return ONLY valid JSON, no markdown: ' +
   '{"suggestion_action": string, "citation_judgments": [{"domain": string, "role": ' +
   '"competitor"|"source"|"unsure"}], "brands_named": [string]}';

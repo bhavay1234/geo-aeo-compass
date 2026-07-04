@@ -171,17 +171,26 @@ export function influenceRollup(
   };
 }
 
-/** Unique competitor brands NAMED across the whole run (named + discovered). */
+/** Unique competitor brands surfaced across the run (named + discovered).
+ *  Mirrors the Competitors-tab logic so the tab COUNT matches the cards:
+ *  tracked competitors always count; discovered ones need >= 2 distinct queries
+ *  (recurrence) to count, so a single-mention long-tail doesn't inflate it. */
 export function allCompetitorBrands(audit: Audit, polls: PollResult[]): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
+  const namedLower = new Set(
+    (audit.competitors ?? []).map((c) => c.trim().toLowerCase()).filter(Boolean)
+  );
+  const rec = new Map<string, { display: string; queries: Set<string> }>();
   for (const p of polls) {
     for (const nm of recommendedBrands(p, audit.brand_name)) {
       const k = nm.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(nm);
+      const ex = rec.get(k);
+      if (ex) ex.queries.add(p.query_text);
+      else rec.set(k, { display: nm, queries: new Set([p.query_text]) });
     }
+  }
+  const out: string[] = [];
+  for (const [k, v] of rec) {
+    if (namedLower.has(k) || v.queries.size >= 2) out.push(v.display);
   }
   return out;
 }
@@ -523,14 +532,20 @@ export function buildCompetitorProfiles(
     for (const dom of competitorDomainsInPoll(p)) competitorJudged.add(dom);
   }
 
-  // Competitor BRANDS named anywhere in the run (prose signal). lower -> display.
-  const recAll = new Map<string, string>();
+  // Competitor BRANDS named in the run, tracking the DISTINCT QUERIES each was
+  // named in. A real rival recurs across queries; a one-off mention is noise —
+  // so discovered competitors need >= 2 distinct queries to surface (named/
+  // tracked competitors always show). This is what tames the "199 brands" list.
+  const recAll = new Map<string, { display: string; queries: Set<string> }>();
   for (const p of polls) {
     for (const nm of recommendedBrands(p, audit.brand_name)) {
       const k = nm.toLowerCase();
-      if (!recAll.has(k)) recAll.set(k, nm);
+      const ex = recAll.get(k);
+      if (ex) ex.queries.add(p.query_text);
+      else recAll.set(k, { display: nm, queries: new Set([p.query_text]) });
     }
   }
+  const DISCOVERED_MIN_QUERIES = 2;
 
   const verdictByKey = new Map<string, string>();
   for (const v of audit.competitor_verdicts ?? []) {
@@ -550,8 +565,8 @@ export function buildCompetitorProfiles(
 
   type Entity = { name: string; domain: string | null; isYou: boolean; discovered: boolean };
   const discoveredBrands = Array.from(recAll.entries())
-    .filter(([k]) => !namedLower.has(k))
-    .map(([, name]) => name);
+    .filter(([k, v]) => !namedLower.has(k) && v.queries.size >= DISCOVERED_MIN_QUERIES)
+    .map(([, v]) => v.display);
   const entities: Entity[] = [
     { name: audit.brand_name, domain: audit.domain, isYou: true, discovered: false },
     ...(audit.competitors ?? []).map((n) => ({
