@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from '../db/supabase';
 import { buildBrandDna } from '../audit/brand-dna';
 import { getEnv } from '../server/runtime';
+import { probeScraper } from '../llm/dataforseo-client';
 
 /**
  * Plain-JSON HTTP API handler for /api/audit/*.
@@ -28,6 +29,12 @@ export async function handleApiRoute(request: Request): Promise<Response> {
   try {
     const env = getEnv();
     const supabase = getSupabaseAdmin(env);
+
+    // TEMPORARY DIAGNOSTIC — inspect the ChatGPT LLM Scraper sources panel.
+    if (path === '/api/scraper-probe' && method === 'GET') {
+      const q = url.searchParams.get('q') || 'best global trade platforms';
+      return Response.json({ query: q, result: await probeScraper(q, env) });
+    }
 
     if (path === '/api/audit/start' && method === 'POST') {
       const body = (await request.json().catch(() => ({}))) as {

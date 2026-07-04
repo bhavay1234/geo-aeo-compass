@@ -25,12 +25,17 @@ function basicAuth(env: Env): string {
   return 'Basic ' + btoa(raw);
 }
 
-async function callDFS(path: string, body: unknown, env: Env): Promise<unknown> {
+async function callDFS(
+  path: string,
+  body: unknown,
+  env: Env,
+  timeoutMs: number = FETCH_TIMEOUT_MS
+): Promise<unknown> {
   if (!env.DATAFORSEO_LOGIN || !env.DATAFORSEO_PASSWORD) {
     throw new Error('DATAFORSEO credentials not configured');
   }
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${API}${path}`, {
       method: 'POST',
@@ -83,6 +88,42 @@ export async function pollChatGPTviaDFS(
     env
   );
   return normalize(data, 'chatgpt', 'gpt-4o (dataforseo)');
+}
+
+/** TEMPORARY DIAGNOSTIC — dump the llm_scraper/live/advanced response shape so
+ *  we can wire the real ChatGPT Sources panel (title/url/snippet per source). */
+export async function probeScraper(query: string, env: Env): Promise<AnyObj> {
+  const data = (await callDFS(
+    '/ai_optimization/chat_gpt/llm_scraper/live/advanced',
+    [
+      {
+        keyword: query,
+        location_code: 2840,
+        language_code: 'en',
+        force_web_search: true,
+      },
+    ],
+    env,
+    150_000
+  )) as AnyObj;
+  const tasks = (data?.tasks as AnyObj[] | undefined) ?? [];
+  const t0 = tasks[0] ?? {};
+  const r0 = ((t0.result as AnyObj[] | undefined) ?? [])[0] ?? {};
+  const sources = (r0.sources as AnyObj[] | undefined) ?? [];
+  const items = (r0.items as AnyObj[] | undefined) ?? [];
+  return {
+    status_code: t0.status_code,
+    status_message: t0.status_message,
+    result_keys: Object.keys(r0),
+    sources_count: sources.length,
+    sources_sample: sources.slice(0, 4),
+    items_count: items.length,
+    item_types: Array.from(
+      new Set(items.map((i) => String((i as AnyObj).type ?? '')))
+    ),
+    markdown_len:
+      typeof r0.markdown === 'string' ? (r0.markdown as string).length : 0,
+  };
 }
 
 export async function pollPerplexity(
