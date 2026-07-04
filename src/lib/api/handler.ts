@@ -1,6 +1,7 @@
 import { getSupabaseAdmin } from '../db/supabase';
 import { buildBrandDna } from '../audit/brand-dna';
 import { getEnv } from '../server/runtime';
+import { probeChatGPTModels, listChatGPTModels } from '../llm/dataforseo-client';
 
 /**
  * Plain-JSON HTTP API handler for /api/audit/*.
@@ -28,6 +29,25 @@ export async function handleApiRoute(request: Request): Promise<Response> {
   try {
     const env = getEnv();
     const supabase = getSupabaseAdmin(env);
+
+    // TEMPORARY DIAGNOSTIC — which DFS ChatGPT models actually ground?
+    // GET /api/dfs-probe?q=...&models=gpt-4o,o4-mini,gpt-5.3-chat-latest
+    if (path === '/api/dfs-probe' && method === 'GET') {
+      const q =
+        url.searchParams.get('q') || 'best AI supply chain visibility platforms';
+      const models = (
+        url.searchParams.get('models') ||
+        'gpt-4o,gpt-4o-search-preview,o4-mini,gpt-5.3-chat-latest'
+      )
+        .split(',')
+        .map((m) => m.trim())
+        .filter(Boolean);
+      const probe = await probeChatGPTModels(q, models, env);
+      return Response.json({ query: q, probe });
+    }
+    if (path === '/api/dfs-models' && method === 'GET') {
+      return Response.json({ models: await listChatGPTModels(env) });
+    }
 
     if (path === '/api/audit/start' && method === 'POST') {
       const body = (await request.json().catch(() => ({}))) as {
