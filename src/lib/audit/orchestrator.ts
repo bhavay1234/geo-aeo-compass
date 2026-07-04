@@ -762,6 +762,27 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       env
     );
 
+    // Ground each competitor's domain in a REAL cited URL when the brand's own
+    // site was cited (portcast.io — NOT a portcast.com guess). Exact first-label
+    // match only, so a short name can't grab an unrelated domain. When nothing
+    // is cited, the classifier's model-known domain (onebeat.co) stands.
+    const citedDomains = new Set<string>();
+    for (const { poll } of perQuery)
+      for (const c of (poll.citations as Citation[]) || []) {
+        const d = normalizeDomain(c.domain || '');
+        if (d) citedDomains.add(d);
+      }
+    for (const comp of classifiedCompetitors) {
+      const core = comp.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (core.length < 3) continue;
+      for (const d of citedDomains) {
+        if (d.split('.')[0] === core) {
+          comp.domain = d;
+          break;
+        }
+      }
+    }
+
     // 6) Recompute insights/summary with the corrected competitor count, then
     //    persist in THREE staged writes so a missing/unmigrated column can't
     //    cascade-drop the others (the cause of empty competitors/verdicts):

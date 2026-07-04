@@ -243,7 +243,7 @@ const SUGGESTION_SYSTEM =
   '"Salesforce"). A brand qualifies only if a buyer could choose it INSTEAD of the ' +
   'audited brand. STRICTLY EXCLUDE, returning none of: generic software categories ' +
   'or their acronyms (e.g. "CRM", "WMS", "TMS", "ERP", "warehouse management ' +
-  'system", "supply chain visibility"); features or capabilities; section headings; ' +
+  'system", "supply chain visibility"); features or capabilities; abstract benefits/outcomes (e.g. "operational efficiency", "real-time insights", "traceability", "IoT sensors"); section headings;' +
   'the audited brand itself; and publishers/review sites/aggregators/sources (those ' +
   'go in citation_judgments). If the answer is generic/educational and names no real ' +
   'competing product, return []. Names exactly as written.\n' +
@@ -358,7 +358,12 @@ const CLASSIFY_SYSTEM =
   'Power BI, Qlik, Excel, SAS), accounting-only software (Sage), freight carriers ' +
   'or 3PLs that are not software products (Schneider), and anything outside this ' +
   'software space. When unsure whether something is a real product rival, DROP it.\n' +
-  'Return ONLY JSON: {"competitors":[{"name":string,"tier":"direct"|"adjacent"}]}.';
+  '4. "domain" = the company\'s OFFICIAL website domain from your knowledge — the ' +
+  'real registrable domain, correct TLD (e.g. "onebeat.co", "portcast.io", ' +
+  '"loginext.com"), lowercase, no protocol/path/www. Do NOT just append ".com" to ' +
+  'the name; if you are not confident of the real domain, use "".\n' +
+  'Return ONLY JSON: ' +
+  '{"competitors":[{"name":string,"tier":"direct"|"adjacent","domain":string}]}.';
 
 /**
  * Map discovered brand names to genuine same-category competitors by intent +
@@ -375,7 +380,7 @@ export async function classifyCompetitors(
     candidates: string[];
   },
   env: Env
-): Promise<Array<{ name: string; tier: 'direct' | 'adjacent' }>> {
+): Promise<Array<{ name: string; tier: 'direct' | 'adjacent'; domain?: string }>> {
   if (!env.OPENAI_API_KEY || input.candidates.length === 0) return [];
   const user = JSON.stringify({
     audited_brand: input.brandName,
@@ -402,15 +407,21 @@ export async function classifyCompetitors(
     ) as { competitors?: unknown };
     if (!Array.isArray(parsed.competitors)) return [];
     const seen = new Set<string>();
-    const out: Array<{ name: string; tier: 'direct' | 'adjacent' }> = [];
+    const out: Array<{ name: string; tier: 'direct' | 'adjacent'; domain?: string }> = [];
     for (const c of parsed.competitors as unknown[]) {
-      const o = c as { name?: unknown; tier?: unknown };
+      const o = c as { name?: unknown; tier?: unknown; domain?: unknown };
       const name = typeof o.name === 'string' ? o.name.trim() : '';
       if (!name) continue;
       const k = name.toLowerCase();
       if (seen.has(k)) continue;
       seen.add(k);
-      out.push({ name, tier: o.tier === 'adjacent' ? 'adjacent' : 'direct' });
+      // Accept only a plausibly-real bare domain; reject the model echoing a
+      // name+".com" guess is left to the caller's citation grounding.
+      const rawDom = typeof o.domain === 'string' ? o.domain.trim().toLowerCase() : '';
+      const domain = /^[a-z0-9]([a-z0-9-]*\.)+[a-z]{2,}$/.test(rawDom.replace(/^www\./, ''))
+        ? rawDom.replace(/^www\./, '')
+        : undefined;
+      out.push({ name, tier: o.tier === 'adjacent' ? 'adjacent' : 'direct', domain });
     }
     return out;
   } catch (err: any) {

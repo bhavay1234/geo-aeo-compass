@@ -581,7 +581,11 @@ export function buildCompetitorProfiles(
   // OpenAI-off / pre-classifier audits: recurrence >= 2 distinct queries.
   const classified = audit.insights?.competitor_brands ?? [];
   const tierByKey = new Map<string, "direct" | "adjacent">();
-  for (const c of classified) tierByKey.set(c.name.toLowerCase(), c.tier);
+  const domainByName = new Map<string, string | undefined>();
+  for (const c of classified) {
+    tierByKey.set(c.name.toLowerCase(), c.tier);
+    domainByName.set(c.name.toLowerCase(), c.domain);
+  }
 
   const recAll = new Map<string, { display: string; queries: Set<string> }>();
   for (const p of polls) {
@@ -629,7 +633,9 @@ export function buildCompetitorProfiles(
     })),
     ...discoveredBrands.map((name) => ({
       name,
-      domain: competitorToDomain(name),
+      // Real domain from the classifier (citation-grounded or model-known), not
+      // a name+".com" guess; guess only as last resort.
+      domain: domainByName.get(name.toLowerCase()) || competitorToDomain(name),
       isYou: false,
       discovered: true,
     })),

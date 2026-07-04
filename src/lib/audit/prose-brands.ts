@@ -28,9 +28,11 @@ const GENERIC = new Set([
 const CATEGORY_ACRONYM =
   /^(erp|wms|tms|oms|crm|scm|aps|esi|plm|hcm|hrm|ipaas|paas|saas|api|apis|ai|ml|rpa|iot|edi|b2b|b2c|kpi|kpis|roi|sku|3pl|4pl|ocr|nlp|llm|sdk|ui|ux)$/i;
 
-// Trailing generic descriptors that mark a CATEGORY, not a product name.
+// Trailing generic descriptors that mark a CATEGORY or a BENEFIT/CAPABILITY
+// phrase, not a product name ("Operational efficiency", "Real-time insights",
+// "IoT sensors", "Customer satisfaction" — the LLM extractor leaks these).
 const CATEGORY_TAIL =
-  /\b(system|systems|software|platform|platforms|solution|solutions|planning|management|middleware|tool|tools|suite|services|service|technologies|technology|ecosystems?|capabilities|analytics|integration|automation|infrastructure|frameworks?|modules?|tracking|visibility|optimization|intelligence|reporting|forecasting|orchestration|monitoring|procurement|fulfillment|dashboards?)$/i;
+  /\b(system|systems|software|platform|platforms|solution|solutions|planning|management|middleware|tool|tools|suite|services|service|technologies|technology|ecosystems?|capabilities|analytics|integration|automation|infrastructure|frameworks?|modules?|tracking|visibility|optimization|intelligence|reporting|forecasting|orchestration|monitoring|procurement|fulfillment|dashboards?|efficiency|insights?|satisfaction|transparency|compliance|traceability|reduction|sensors?|sustainability|productivity|collaboration|resilience|accuracy|reliability|connectivity|scalability|learning|exchange|governance|execution|enablement|experience|engagement|performance|savings|security)$/i;
 
 // Section-heading / non-noun openers.
 const HEADING_START =

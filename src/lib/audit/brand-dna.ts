@@ -322,6 +322,26 @@ export async function buildBrandDna(
     }
   }
 
+  // Top up toward a useful breadth WITHOUT reintroducing clustering: when the
+  // LLM curated only a handful (thin/all-soft seed pool), pull more DIVERSE
+  // candidates from the balanced pool, jaccard-deduped against what's picked.
+  // If the pool is genuinely thin we just take what's there.
+  const TARGET = 15;
+  if (queries.length >= 5 && queries.length < TARGET) {
+    const pickedSigs = queries.map((q) => wordSig(q.keyword));
+    const have = new Set(queries.map((q) => q.keyword.toLowerCase()));
+    for (const c of pool) {
+      if (queries.length >= TARGET) break;
+      const kw = c.s.keyword;
+      if (have.has(kw.toLowerCase())) continue;
+      const sig = wordSig(kw);
+      if (pickedSigs.some((p) => jaccard(sig, p) >= 0.55)) continue;
+      pickedSigs.push(sig);
+      have.add(kw.toLowerCase());
+      queries.push({ keyword: c.s.keyword, volume: c.s.volume, intent: c.s.intent });
+    }
+  }
+
   // Heuristic fallback (no key, or the selector returned too little).
   if (queries.length < 5) queries = pickQueries(all, dna.brand_name, intentMode);
 

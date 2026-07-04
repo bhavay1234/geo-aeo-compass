@@ -235,6 +235,10 @@ export interface AuditInsights {
 export interface ClassifiedCompetitor {
   name: string;
   tier: 'direct' | 'adjacent';
+  /** Official website domain, grounded in cited URLs where possible, else the
+   *  model's best knowledge ("onebeat.co", "portcast.io") — NOT a name+".com"
+   *  guess. Absent when unresolved (caller falls back to the guess). */
+  domain?: string;
 }
 
 export interface AuditSummary {
