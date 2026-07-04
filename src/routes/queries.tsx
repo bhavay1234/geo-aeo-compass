@@ -280,19 +280,22 @@ function MethodologyNote() {
       </button>
       {open && (
         <div style={{ marginTop: 8 }}>
-          Every query runs in a <strong>cold, no-login session (US region)</strong>{" "}
-          against ChatGPT (OpenAI web search), Perplexity, and Gemini — what a{" "}
-          <strong>fresh buyer</strong> sees, not your personalized ChatGPT (which
-          already knows your brand from your history). The answers and sources
-          below are captured verbatim from those runs.
+          These results come from the <strong>official APIs</strong> — ChatGPT via
+          OpenAI, Perplexity and Gemini via DataForSEO — run in a{" "}
+          <strong>cold, no-login session (US region)</strong>, i.e. what a{" "}
+          <strong>fresh buyer</strong> sees, not your personalized account.
           <br />
           <br />
-          The verbatim answer + source list on each card <em>is</em> the record —
-          that's your proof artifact. We don't screenshot the live LLM UIs: it
-          costs <strong>~10× per query</strong>, and a logged-in screenshot (or
-          the "Try in ChatGPT" link) reruns in <em>that account's</em> personalized
-          session — useful to sanity-check, but <strong>not proof</strong>, because
-          it isn't the neutral buyer's view this audit measures.
+          AI answers are <strong>non-deterministic</strong>: if you run the same
+          query on your own device you may get a different result — your ChatGPT
+          has memory/history, and answers shift by account, session, region, and
+          time. <em>That's expected, not an error in this report.</em>
+          <br />
+          <br />
+          Want to confirm what <strong>your device</strong> shows? Our browser
+          extension <em>(optional, coming soon)</em> re-runs these queries in your
+          own <strong>logged-out</strong> browser and shows them side-by-side with
+          this report — so you can verify the match yourself.
         </div>
       )}
     </div>
