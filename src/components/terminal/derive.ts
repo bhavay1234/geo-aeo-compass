@@ -55,7 +55,10 @@ export function categorizeCitations(
   const compDomains = competitorDomainSet(audit);
   const groups = new Map<CitationCategory, CitationAnalysisEntry[]>();
   for (const e of entries) {
-    const cat = citationCategory(e.url, e.domain, e.source_type, compDomains);
+    // For Gemini, e.url is the vertexaisearch proxy; the real deep path lives in
+    // resolved_url. Category detection (listicle/review URL patterns) must run on
+    // the resolved URL or every Gemini source falls through to 'vendor'.
+    const cat = citationCategory(e.resolved_url || e.url, e.domain, e.source_type, compDomains);
     const arr = groups.get(cat);
     if (arr) arr.push(e);
     else groups.set(cat, [e]);
