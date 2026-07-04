@@ -12,9 +12,23 @@ import type { CitationCategory } from "@/lib/audit/source-classifier";
 import type {
   Audit,
   CitationAnalysisEntry,
+  LlmSource,
   PollResult,
   SourceType,
 } from "@/lib/db/types";
+
+/** Broken link: permanently/really dead. Bot-block / auth / rate-limit statuses
+ *  (401/403/429) are NOT dead — the page exists, it just refused our probe. */
+function isDeadLink(e: CitationAnalysisEntry): boolean {
+  const s = e.status_code;
+  return s != null && s >= 400 && s !== 401 && s !== 403 && s !== 429;
+}
+
+const LLM_LABEL: Record<LlmSource, string> = {
+  chatgpt: "ChatGPT",
+  perplexity: "Perplexity",
+  gemini: "Gemini",
+};
 
 export const Route = createFileRoute("/citations")({
   head: () => ({ meta: [{ title: "Citations — Compass" }] }),
@@ -64,6 +78,8 @@ function Row({
 }) {
   const k = KIND[e.source_type] ?? KIND.other;
   const citingCount = (e.llms_citing ?? []).length || 1;
+  // Real destination — resolves Gemini's vertexaisearch redirect to the actual page.
+  const link = e.resolved_url || e.url;
   return (
     <div className="tm-card" style={{ position: "relative" }}>
       <span
@@ -87,7 +103,7 @@ function Row({
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {/* Page title — the real link text, not just the bare domain. */}
             <a
-              href={e.url}
+              href={link}
               target="_blank"
               rel="noopener noreferrer"
               style={{ fontSize: 13.5, fontWeight: 600, color: "var(--ink)", textDecoration: "none" }}
@@ -114,9 +130,9 @@ function Row({
               </span>
             )}
           </div>
-          {/* Complete URL of the cited page. */}
+          {/* Complete URL of the cited page (final destination). */}
           <a
-            href={e.url}
+            href={link}
             target="_blank"
             rel="noopener noreferrer"
             className="mono"
@@ -129,9 +145,9 @@ function Row({
               overflowWrap: "anywhere",
               wordBreak: "break-all",
             }}
-            title={e.url}
+            title={link}
           >
-            {e.url}
+            {link}
           </a>
           <div className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", marginTop: 3 }}>
             cited by <b style={{ color: "var(--ink-2)" }}>{citingCount}/{llmCount}</b>{" "}
@@ -157,8 +173,9 @@ function Row({
 
 function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const entries = audit.citation_analysis ?? [];
-  const llmCount = llmsPolled(audit).length;
+  const polledLlms = llmsPolled(audit);
   const [openKey, setOpenKey] = useState<CitationCategory | null>(null);
+  const [llmFilter, setLlmFilter] = useState<LlmSource | "all">("all");
 
   // URL → page title, mined from the raw poll citations (citation_analysis
   // stores the URL but not the title). First non-empty title for a URL wins.
@@ -175,9 +192,6 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     return m;
   }, [polls]);
 
-  const universalMissing = entries.filter(
-    (e) => !e.brand_present && (e.llms_citing ?? []).length >= 2
-  );
   const recentlyCompleted =
     !!audit.completed_at &&
     Date.now() - new Date(audit.completed_at).getTime() < 5 * 60_000;
@@ -200,8 +214,22 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     );
   }
 
-  const present = entries.filter((e) => e.brand_present);
-  const groups = categorizeCitations(entries);
+  // Drop dead links (404/410/5xx…) — "no broken links". Then apply the LLM
+  // filter (which LLM cited it). Categories/counts reflect the visible set.
+  const liveEntries = entries.filter((e) => !isDeadLink(e));
+  const deadCount = entries.length - liveEntries.length;
+  const visibleEntries =
+    llmFilter === "all"
+      ? liveEntries
+      : liveEntries.filter((e) => (e.llms_citing ?? []).includes(llmFilter));
+
+  const llmCount = llmFilter === "all" ? polledLlms.length : 1;
+  const present = visibleEntries.filter((e) => e.brand_present);
+  const universalMissing = visibleEntries.filter(
+    (e) => !e.brand_present && (e.llms_citing ?? []).length >= 2
+  );
+  const groups = categorizeCitations(audit, visibleEntries);
+  const totalVisible = visibleEntries.length;
 
   return (
     <div>
@@ -216,11 +244,12 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
           className="nar"
           style={{ fontSize: 22, lineHeight: 1.42, fontWeight: 500, color: "var(--ink-2)", maxWidth: 1040 }}
         >
-          {llmCount > 1 ? (
+          {llmFilter === "all" && polledLlms.length > 1 ? (
             <>
-              <b style={{ color: "var(--ink)" }}>{llmCount} LLMs</b> collectively
-              cited <b style={{ color: "var(--ink)" }}>{entries.length}</b> source
-              {entries.length === 1 ? "" : "s"} — you appear on{" "}
+              <b style={{ color: "var(--ink)" }}>{polledLlms.length} LLMs</b>{" "}
+              collectively cited{" "}
+              <b style={{ color: "var(--ink)" }}>{totalVisible}</b> source
+              {totalVisible === 1 ? "" : "s"} — you appear on{" "}
               <b style={{ color: present.length > 0 ? "var(--pos)" : "var(--hot)" }}>
                 {present.length}
               </b>{" "}
@@ -236,9 +265,11 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
             </>
           ) : (
             <>
-              ChatGPT cited <b style={{ color: "var(--ink)" }}>{entries.length}</b>{" "}
-              source{entries.length === 1 ? "" : "s"} across these queries — you appear
-              on{" "}
+              <b style={{ color: "var(--ink)" }}>
+                {llmFilter === "all" ? "ChatGPT" : LLM_LABEL[llmFilter]}
+              </b>{" "}
+              cited <b style={{ color: "var(--ink)" }}>{totalVisible}</b>{" "}
+              source{totalVisible === 1 ? "" : "s"} — you appear on{" "}
               <b style={{ color: present.length > 0 ? "var(--pos)" : "var(--hot)" }}>
                 {present.length}
               </b>{" "}
@@ -253,11 +284,57 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         </p>
         <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 6 }}>
           Where the LLMs source their answers, and whether you're on the page.
-          {llmCount > 1
+          {polledLlms.length > 1
             ? " Sources cited by multiple LLMs are the highest-leverage places to get listed."
             : " Missing aggregators & review directories are your get-listed worklist."}
+          {deadCount > 0 && (
+            <span style={{ color: "var(--ink-3)" }}>
+              {" "}
+              {deadCount} dead link{deadCount === 1 ? "" : "s"} hidden.
+            </span>
+          )}
         </p>
       </div>
+
+      {/* View toggle — all sources grouped, or filtered to one LLM's citations. */}
+      {polledLlms.length > 1 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "12px 20px",
+            borderBottom: "1px solid var(--grid-2)",
+          }}
+        >
+          <span
+            className="mono"
+            style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".06em" }}
+          >
+            View
+          </span>
+          {(["all", ...polledLlms] as const).map((opt) => {
+            const active = llmFilter === opt;
+            return (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setLlmFilter(opt)}
+                className="tm-badge"
+                style={{
+                  cursor: "pointer",
+                  border: active ? "1px solid var(--ink)" : "1px solid var(--grid-2)",
+                  background: active ? "var(--ink)" : "transparent",
+                  color: active ? "var(--panel)" : "var(--ink-2)",
+                  fontWeight: active ? 700 : 500,
+                }}
+              >
+                {opt === "all" ? "All grouped" : LLM_LABEL[opt]}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Category overview — where the LLMs pull from, clubbed into buckets. */}
       <div

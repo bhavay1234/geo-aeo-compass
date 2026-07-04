@@ -24,17 +24,42 @@ export interface CitationCategoryGroup {
   missing: number;
 }
 
+/** Every domain we know to be a rival of the audited brand — tracked
+ *  competitors, the classifier's competitor_brands (real domains), and
+ *  citation-judged competitor domains. Lets cited rival sites bucket into
+ *  "Competitors" instead of the generic "Vendor" pile. */
+export function competitorDomainSet(audit: Audit): Set<string> {
+  const s = new Set<string>();
+  for (const c of audit.competitors ?? []) {
+    const d = normalizeDomain(competitorToDomain(c));
+    if (d) s.add(d);
+  }
+  for (const c of audit.insights?.competitor_brands ?? []) {
+    const d = normalizeDomain(c.domain || competitorToDomain(c.name));
+    if (d) s.add(d);
+  }
+  for (const d of audit.discovered_competitors ?? []) {
+    if (d.label === "competitor") {
+      const nd = normalizeDomain(d.domain);
+      if (nd) s.add(nd);
+    }
+  }
+  return s;
+}
+
 /**
- * Club the cited-source rollup into the ≤10 buyer-facing categories. Categories
+ * Club the cited-source rollup into the 10 buyer-facing categories. Categories
  * are ordered most-cited first; within each, missing-you sources lead (the
  * get-listed worklist), then by cross-query cite count.
  */
 export function categorizeCitations(
+  audit: Audit,
   entries: CitationAnalysisEntry[]
 ): CitationCategoryGroup[] {
+  const compDomains = competitorDomainSet(audit);
   const groups = new Map<CitationCategory, CitationAnalysisEntry[]>();
   for (const e of entries) {
-    const cat = citationCategory(e.url, e.domain, e.source_type);
+    const cat = citationCategory(e.url, e.domain, e.source_type, compDomains);
     const arr = groups.get(cat);
     if (arr) arr.push(e);
     else groups.set(cat, [e]);

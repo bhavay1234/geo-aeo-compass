@@ -227,6 +227,41 @@ async function setStatus(
   }
 }
 
+const STATUS_UA =
+  'Mozilla/5.0 (compatible; CompassAEO/1.0; +https://compass.aeo) AppleWebKit/537.36';
+
+/**
+ * Lightweight liveness + final-URL probe for a cited URL. HEAD first (cheap),
+ * GET fallback when HEAD is rejected. Follows redirects, so `finalUrl` is the
+ * real destination — resolving Gemini's vertexaisearch grounding proxies to the
+ * actual page. status 0 = unknown (network error/timeout) — never treated dead.
+ */
+async function resolveUrlStatus(url: string): Promise<{ status: number; finalUrl: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    let res = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: controller.signal,
+      headers: { 'user-agent': STATUS_UA },
+    });
+    if ([403, 405, 501].includes(res.status)) {
+      res = await fetch(url, {
+        method: 'GET',
+        redirect: 'follow',
+        signal: controller.signal,
+        headers: { 'user-agent': STATUS_UA, accept: 'text/html,*/*' },
+      });
+    }
+    return { status: res.status, finalUrl: res.url || url };
+  } catch {
+    return { status: 0, finalUrl: url };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // ── main ─────────────────────────────────────────────────────────────────
 
 /**
@@ -295,12 +330,32 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   const allUrls = Array.from(urlMeta.keys());
   const pages = await resolveSignals(supabase, allUrls, env);
 
+  // Status + final-URL probe — but only where needed, to bound subrequests:
+  // URLs the content fetch couldn't parse (dead candidates: 404, block, non-html)
+  // and Gemini vertexaisearch redirects (whose real destination we must resolve).
+  // Pages that fetched fine are alive (2xx) and already carry their real URL.
+  const resolveTargets = allUrls.filter(
+    (u) => !pages.has(u) || u.includes('vertexaisearch.cloud.google.com')
+  );
+  const probed = await mapWithConcurrency(resolveTargets, 8, (u) => resolveUrlStatus(u));
+  const statusByUrl = new Map<string, { status: number; finalUrl: string }>();
+  resolveTargets.forEach((u, i) => statusByUrl.set(u, probed[i]));
+
   const analysis: CitationAnalysisEntry[] = allUrls.map((url) => {
     const meta = urlMeta.get(url)!;
     const page = pages.get(url);
     const presence = page
       ? brandPresence({ title: page.signals.title, text_sample: page.text_sample }, you, brandDomain)
       : { brand_present: false, match_type: 'none' as const };
+    const probe = statusByUrl.get(url);
+    // Alive pages (in `pages`) → 2xx; probed URLs → their real status; else unknown.
+    const status_code = probe
+      ? probe.status || undefined
+      : page
+        ? page.signals.http_status
+        : undefined;
+    const resolved_url =
+      probe && probe.finalUrl && probe.finalUrl !== url ? probe.finalUrl : undefined;
     return {
       url,
       domain: meta.domain,
@@ -309,6 +364,8 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
       llms_citing: Array.from(meta.llms) as LlmSource[],
       brand_present: presence.brand_present,
       match_type: presence.match_type,
+      status_code,
+      resolved_url,
     };
   });
   // Rank by cross-LLM leverage first (# distinct LLMs citing), then breadth

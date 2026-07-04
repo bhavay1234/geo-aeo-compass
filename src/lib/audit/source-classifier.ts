@@ -97,32 +97,59 @@ export const UGC_DOMAINS = new Set<string>([
   'news.ycombinator.com',
 ]);
 
-/** The ≤10 buyer-facing buckets we club cited sources into on the Citations tab. */
+// Tech media that primarily REVIEW products (product reviews / "hands-on"),
+// distinct from vendor sites — e.g. techradar.com/reviews/motive-fleet-management.
+export const REVIEW_MEDIA_DOMAINS = new Set<string>([
+  'techradar.com',
+  'pcmag.com',
+  'tomsguide.com',
+  'cnet.com',
+  'zdnet.com',
+  'trustpilot.com',
+  'business.com',
+  'expertinsights.com',
+  'crozdesk.com',
+]);
+
+/** The 10 buyer-facing buckets we club cited sources into on the Citations tab. */
 export type CitationCategory =
-  | 'reddit'
-  | 'youtube'
-  | 'linkedin'
+  | 'competitor'
+  | 'vendor'
   | 'reviews'
   | 'listicles'
   | 'editorial'
   | 'pr'
-  | 'vendor'
-  | 'ugc'
-  | 'other';
+  | 'reddit'
+  | 'youtube'
+  | 'linkedin'
+  | 'community';
 
 /** Roundup / "best-X-software" listicle URL pattern (host-agnostic). */
 const LISTICLE_URL =
   /\b(best|top)\b[-\w/]*\b(software|tools?|platforms?|solutions?|systems?|apps?|vendors?|companies|services|providers?)\b|\b(alternatives?|vs|versus|comparison)\b/i;
 
+/** Product-review URL pattern (a review section on any host). */
+const REVIEW_URL = /\/reviews?\//i;
+
+/** True if `d` is, or is a subdomain of, any competitor domain in the set. */
+function inDomainSet(d: string, set: Set<string> | undefined): boolean {
+  if (!set || set.size === 0) return false;
+  if (set.has(d)) return true;
+  for (const c of set) if (c && d.endsWith('.' + c)) return true;
+  return false;
+}
+
 /**
- * Club a cited source into one of ≤10 categories, deterministically, from its
- * domain + URL + existing source_type. First match wins; order matters (a
- * competitor's own listicle is still "vendor").
+ * Club a cited source into one of 10 categories, deterministically, from its
+ * domain + URL + source_type (+ the audit's known competitor domains). First
+ * match wins; order matters. `competitorDomains` lets a rival's own product
+ * site land in "Competitors" instead of the generic "Vendor" bucket.
  */
 export function citationCategory(
   url: string,
   domain: string,
-  sourceType: SourceType
+  sourceType: SourceType,
+  competitorDomains?: Set<string>
 ): CitationCategory {
   const d = normalizeDomain(domain);
   const u = (url || '').toLowerCase();
@@ -131,27 +158,37 @@ export function citationCategory(
   if (host('reddit.com')) return 'reddit';
   if (host('youtube.com') || d === 'youtu.be') return 'youtube';
   if (host('linkedin.com')) return 'linkedin';
-  // Authoritative vendor classification wins over content-shape heuristics.
-  if (sourceType === 'own' || sourceType === 'competitor') return 'vendor';
-  if (REVIEW_DOMAINS.has(d) || ANALYST_DOMAINS.has(d) || u.includes('peerinsights'))
+  // A rival's OWN website — kept separate from generic vendor/product sites.
+  if (sourceType === 'competitor' || inDomainSet(d, competitorDomains)) return 'competitor';
+  // Reviews & directories: software-review sites, analysts, review-media, and
+  // any "/reviews/" section (techradar.com/reviews/...).
+  if (
+    REVIEW_DOMAINS.has(d) ||
+    ANALYST_DOMAINS.has(d) ||
+    REVIEW_MEDIA_DOMAINS.has(d) ||
+    u.includes('peerinsights') ||
+    REVIEW_URL.test(u)
+  )
     return 'reviews';
   if (PR_DOMAINS.has(d) || /\b(press-?release|newswire)\b/.test(u)) return 'pr';
-  if (UGC_DOMAINS.has(d) || host('medium.com') || host('substack.com')) return 'ugc';
-  if (LISTICLE_URL.test(u)) return 'listicles';
-  if (sourceType === 'editorial' || EDITORIAL_DOMAINS.has(d) || NEWS_DOMAINS.has(d))
-    return 'editorial';
-  // Reference / non-commercial: encyclopedic, academic, government, docs/support.
+  // Community / UGC / reference: forums, Q&A, blogging platforms, social, plus
+  // encyclopedic / academic / government / docs.
   if (
+    UGC_DOMAINS.has(d) ||
+    host('medium.com') ||
+    host('substack.com') ||
     host('wikipedia.org') ||
     d.endsWith('.edu') ||
     d.endsWith('.gov') ||
     d.endsWith('.ac.uk') ||
     /^(docs|support|help|developer|developers|kb)\./.test(d)
   )
-    return 'other';
-  // Default in an AI buyer answer: a product/company (vendor) website. This is
-  // the dominant citation type — LLMs mostly pull from the products' own sites —
-  // so it is the catch-all rather than dumping everything into "Other".
+    return 'community';
+  if (LISTICLE_URL.test(u)) return 'listicles';
+  if (sourceType === 'editorial' || EDITORIAL_DOMAINS.has(d) || NEWS_DOMAINS.has(d))
+    return 'editorial';
+  // Default in an AI buyer answer: a product/company (vendor) website — incl. the
+  // brand's own site (source_type 'own'). The dominant citation type.
   return 'vendor';
 }
 
@@ -160,16 +197,16 @@ export const CITATION_CATEGORY_META: Record<
   CitationCategory,
   { label: string; order: number }
 > = {
-  vendor: { label: 'Vendor & Product Sites', order: 0 },
-  reviews: { label: 'Reviews & Directories', order: 1 },
-  listicles: { label: 'Listicles & Roundups', order: 2 },
-  editorial: { label: 'Editorial & News', order: 3 },
-  reddit: { label: 'Reddit', order: 4 },
-  youtube: { label: 'YouTube', order: 5 },
-  linkedin: { label: 'LinkedIn', order: 6 },
-  ugc: { label: 'Forums & UGC', order: 7 },
-  pr: { label: 'PR & Press Releases', order: 8 },
-  other: { label: 'Other & Reference', order: 9 },
+  competitor: { label: 'Competitors', order: 0 },
+  vendor: { label: 'Vendor & Product Sites', order: 1 },
+  reviews: { label: 'Reviews & Directories', order: 2 },
+  listicles: { label: 'Listicles & Roundups', order: 3 },
+  editorial: { label: 'Editorial & News', order: 4 },
+  pr: { label: 'PR & Press Releases', order: 5 },
+  reddit: { label: 'Reddit', order: 6 },
+  youtube: { label: 'YouTube', order: 7 },
+  linkedin: { label: 'LinkedIn', order: 8 },
+  community: { label: 'Community & Reference', order: 9 },
 };
 
 export function normalizeDomain(domain: string): string {

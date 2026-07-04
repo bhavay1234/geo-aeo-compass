@@ -154,6 +154,12 @@ export interface CitationAnalysisEntry {
   llms_citing: LlmSource[];
   brand_present: boolean;
   match_type: "name" | "domain" | "none";
+  /** HTTP status of the cited URL (after following redirects). >=400 = dead —
+   *  filtered from the UI. Absent on audits run before status-checking shipped. */
+  status_code?: number;
+  /** Final URL after redirects — the real destination for Gemini's
+   *  vertexaisearch grounding-redirect proxies. Absent = use `url`. */
+  resolved_url?: string;
 }
 
 /** Which of the three influence factors most likely drove a naming. */
