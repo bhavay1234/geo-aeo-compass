@@ -1,7 +1,6 @@
 import { getSupabaseAdmin } from '../db/supabase';
 import { buildBrandDna } from '../audit/brand-dna';
 import { getEnv } from '../server/runtime';
-import { probeChatGPTModel } from '../llm/openai-client';
 
 /**
  * Plain-JSON HTTP API handler for /api/audit/*.
@@ -29,19 +28,6 @@ export async function handleApiRoute(request: Request): Promise<Response> {
   try {
     const env = getEnv();
     const supabase = getSupabaseAdmin(env);
-
-    // TEMPORARY DIAGNOSTIC — which OpenAI model does this account accept on the
-    // Responses API + web_search? GET /api/gpt-probe?models=gpt-5.5,gpt-5,gpt-4.1
-    if (path === '/api/gpt-probe' && method === 'GET') {
-      const q = url.searchParams.get('q') || 'best global trade management software';
-      const models = (url.searchParams.get('models') || 'gpt-5.5,gpt-5,gpt-4.1')
-        .split(',')
-        .map((m) => m.trim())
-        .filter(Boolean);
-      const out = [];
-      for (const m of models) out.push(await probeChatGPTModel(q, m, env));
-      return Response.json({ query: q, probe: out });
-    }
 
     if (path === '/api/audit/start' && method === 'POST') {
       const body = (await request.json().catch(() => ({}))) as {

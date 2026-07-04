@@ -173,7 +173,7 @@ function extractRawCitations(
  *  legacy gpt-4o-search-preview chat model gave vague, thinly-sourced answers;
  *  the web_search tool lets a full model run real searches and cite specific
  *  third-party pages. Kept as a constant so the fallback path is explicit. */
-const WEBSEARCH_MODEL = 'gpt-4.1';
+const WEBSEARCH_MODEL = 'gpt-5.5';
 
 /**
  * Polls ChatGPT with a buyer-intent query. PRIMARY path: OpenAI Responses API
@@ -215,8 +215,10 @@ async function pollChatGPTWebSearch(
   query: string,
   env: Env,
   model: string = WEBSEARCH_MODEL,
-  timeoutMs: number = 90000,
-  retries: number = 1
+  // GPT-5.x web search is a slow reasoning call (~90s observed). Single attempt
+  // with a generous timeout; the gpt-4o-search-preview fallback covers failures.
+  timeoutMs: number = 110000,
+  retries: number = 0
 ): Promise<OpenAIPollResult> {
   const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
   const response = await pRetry(
@@ -256,28 +258,6 @@ async function pollChatGPTWebSearch(
   };
 }
 
-/** TEMPORARY DIAGNOSTIC — does the account accept `model` on the Responses API
- *  with web_search? Returns citation/text sizes or the API error. */
-export async function probeChatGPTModel(
-  query: string,
-  model: string,
-  env: Env
-): Promise<{ model: string; ok: boolean; citations: number; text_chars: number; error?: string }> {
-  if (!env.OPENAI_API_KEY) return { model, ok: false, citations: 0, text_chars: 0, error: 'no key' };
-  try {
-    // Single attempt, generous timeout — GPT-5.x web search is a slow reasoning
-    // call; retries would blow the relay window.
-    const r = await pollChatGPTWebSearch(query, env, model, 100000, 0);
-    return {
-      model,
-      ok: !!(r.response_text || r.citations.length),
-      citations: r.citations.length,
-      text_chars: r.response_text.length,
-    };
-  } catch (err: any) {
-    return { model, ok: false, citations: 0, text_chars: 0, error: String(err?.message).slice(0, 200) };
-  }
-}
 
 /** Extract answer text + url_citation annotations from a Responses API result. */
 function extractResponses(response: any): {
