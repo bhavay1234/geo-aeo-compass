@@ -2,7 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Workspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
 import { SourceTag } from "@/components/terminal/primitives";
-import { llmsPolled, type SourceTagKind } from "@/components/terminal/derive";
+import {
+  llmsPolled,
+  categorizeCitations,
+  type SourceTagKind,
+} from "@/components/terminal/derive";
 import type {
   Audit,
   CitationAnalysisEntry,
@@ -152,7 +156,7 @@ function CitationsView({ audit }: { audit: Audit }) {
   }
 
   const present = entries.filter((e) => e.brand_present);
-  const missing = entries.filter((e) => !e.brand_present);
+  const groups = categorizeCitations(entries);
 
   return (
     <div>
@@ -210,33 +214,55 @@ function CitationsView({ audit }: { audit: Audit }) {
         </p>
       </div>
 
-      {missing.length > 0 && (
-        <>
-          <div className="tm-phead">
-            <h2 style={{ color: "var(--hot)" }}>⚑ You're missing here</h2>
-            <span className="meta">{missing.length} sources · most-cited first</span>
-          </div>
-          <div className="tm-rows">
-            {missing.map((e, i) => (
-              <Row key={e.url} e={e} rank={i + 1} llmCount={llmCount} />
-            ))}
-          </div>
-        </>
-      )}
+      {/* Category overview — where the LLMs pull from, clubbed into buckets. */}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 8,
+          padding: "14px 20px",
+          borderBottom: "1px solid var(--grid-2)",
+        }}
+      >
+        {groups.map((g) => (
+          <span
+            key={g.key}
+            className="tm-badge"
+            style={{ background: "var(--panel-2)", color: "var(--ink-2)", fontSize: 11.5 }}
+            title={`${g.total} source${g.total === 1 ? "" : "s"}${
+              g.missing > 0 ? ` · ${g.missing} missing you` : ""
+            }`}
+          >
+            {g.label}{" "}
+            <b style={{ color: "var(--ink)" }}>{g.total}</b>
+            {g.missing > 0 && (
+              <span style={{ color: "var(--hot)" }}> · {g.missing} missing</span>
+            )}
+          </span>
+        ))}
+      </div>
 
-      {present.length > 0 && (
-        <>
-          <div className="tm-phead">
-            <h2 style={{ color: "var(--pos)" }}>✓ You appear here</h2>
-            <span className="meta">{present.length} sources</span>
-          </div>
+      {groups.map((g) => (
+        <details key={g.key} open>
+          <summary
+            className="tm-phead"
+            style={{ cursor: "pointer", listStyle: "none" }}
+          >
+            <h2>{g.label}</h2>
+            <span className="meta">
+              {g.total} source{g.total === 1 ? "" : "s"}
+              {g.missing > 0 && (
+                <span style={{ color: "var(--hot)" }}> · {g.missing} missing you</span>
+              )}
+            </span>
+          </summary>
           <div className="tm-rows">
-            {present.map((e, i) => (
+            {g.entries.map((e, i) => (
               <Row key={e.url} e={e} rank={i + 1} llmCount={llmCount} />
             ))}
           </div>
-        </>
-      )}
+        </details>
+      ))}
     </div>
   );
 }

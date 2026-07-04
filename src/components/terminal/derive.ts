@@ -2,11 +2,64 @@ import type {
   Audit,
   PollResult,
   Citation,
+  CitationAnalysisEntry,
   DecisiveFactor,
   LlmSource,
 } from "@/lib/db/types";
-import { normalizeDomain, competitorToDomain } from "@/lib/audit/source-classifier";
+import {
+  normalizeDomain,
+  competitorToDomain,
+  citationCategory,
+  CITATION_CATEGORY_META,
+  type CitationCategory,
+} from "@/lib/audit/source-classifier";
 import { isBrandLike, brandInProse } from "@/lib/audit/prose-brands";
+
+export interface CitationCategoryGroup {
+  key: CitationCategory;
+  label: string;
+  entries: CitationAnalysisEntry[];
+  total: number;
+  /** Sources in this category where the brand does NOT appear (the worklist). */
+  missing: number;
+}
+
+/**
+ * Club the cited-source rollup into the ≤10 buyer-facing categories. Categories
+ * are ordered most-cited first; within each, missing-you sources lead (the
+ * get-listed worklist), then by cross-query cite count.
+ */
+export function categorizeCitations(
+  entries: CitationAnalysisEntry[]
+): CitationCategoryGroup[] {
+  const groups = new Map<CitationCategory, CitationAnalysisEntry[]>();
+  for (const e of entries) {
+    const cat = citationCategory(e.url, e.domain, e.source_type);
+    const arr = groups.get(cat);
+    if (arr) arr.push(e);
+    else groups.set(cat, [e]);
+  }
+  return Array.from(groups.entries())
+    .map(([key, es]) => ({
+      key,
+      label: CITATION_CATEGORY_META[key].label,
+      total: es.length,
+      missing: es.filter((e) => !e.brand_present).length,
+      entries: es
+        .slice()
+        .sort(
+          (a, b) =>
+            Number(a.brand_present) - Number(b.brand_present) ||
+            b.query_count - a.query_count ||
+            (b.llms_citing?.length ?? 0) - (a.llms_citing?.length ?? 0)
+        ),
+    }))
+    .sort(
+      (a, b) =>
+        b.total - a.total ||
+        CITATION_CATEGORY_META[a.key].order - CITATION_CATEGORY_META[b.key].order
+    );
+}
 
 export type QueryState = "absent" | "weak" | "held";
 
