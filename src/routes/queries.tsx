@@ -245,6 +245,122 @@ interface QueryGroup {
   polls: Map<LlmSource, PollResult>;
 }
 
+/** Honest methodology note — sets buyer expectations so any gap vs the client's
+ *  own personalized ChatGPT reads as expected, not a bug. */
+function MethodologyNote() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      style={{
+        border: "1px solid var(--grid)",
+        borderRadius: 6,
+        padding: "10px 12px",
+        marginBottom: 12,
+        background: "var(--panel-2)",
+        fontSize: 12,
+        lineHeight: 1.5,
+        color: "var(--ink-2)",
+      }}
+    >
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          background: "none",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          color: "var(--ink)",
+          fontWeight: 700,
+          fontSize: 11,
+          letterSpacing: ".04em",
+          textTransform: "uppercase",
+        }}
+      >
+        {open ? "▾" : "▸"} How this is measured
+      </button>
+      {open && (
+        <div style={{ marginTop: 8 }}>
+          Every query runs in a <strong>cold, no-login session (US region)</strong>{" "}
+          against ChatGPT (OpenAI web search), Perplexity, and Gemini — what a{" "}
+          <strong>fresh buyer</strong> sees, not your personalized ChatGPT (which
+          already knows your brand from your history). The answers and sources
+          below are captured verbatim from those runs.
+          <br />
+          <br />
+          We don't screenshot the live LLM UIs by default: it costs{" "}
+          <strong>~10× per query</strong>, and a logged-in screenshot reflects{" "}
+          <em>that account's</em> biased view, not a neutral buyer's. For a
+          client-facing captured artifact, use{" "}
+          <strong>"Capture actual response"</strong> on a ChatGPT answer below.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** OPT-IN proof capture button (ChatGPT only) — calls the DFS scraper on demand
+ *  (~10x cost) and surfaces the shareable check_url. */
+function CaptureButton({ query }: { query: string }) {
+  const [state, setState] = useState<
+    | { s: "idle" }
+    | { s: "loading" }
+    | { s: "done"; url: string | null; sources: number }
+    | { s: "error"; msg: string }
+  >({ s: "idle" });
+
+  const run = async () => {
+    setState({ s: "loading" });
+    try {
+      const res = await fetch("/api/query/capture", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      if (!res.ok) throw new Error(`capture ${res.status}`);
+      const j = (await res.json()) as { check_url?: string; sources?: number };
+      setState({ s: "done", url: j.check_url ?? null, sources: j.sources ?? 0 });
+    } catch (e: any) {
+      setState({ s: "error", msg: e?.message || "failed" });
+    }
+  };
+
+  if (state.s === "done") {
+    return (
+      <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+        {state.url ? (
+          <a href={state.url} target="_blank" rel="noopener noreferrer" className="mono">
+            ↗ View captured response ({state.sources} sources)
+          </a>
+        ) : (
+          "captured — no shareable link returned"
+        )}
+      </span>
+    );
+  }
+  return (
+    <button
+      onClick={run}
+      disabled={state.s === "loading"}
+      title="Runs the DFS ChatGPT scraper on demand — ~10x the cost of a normal query"
+      style={{
+        background: "none",
+        border: "1px solid var(--grid)",
+        borderRadius: 4,
+        padding: "3px 8px",
+        cursor: state.s === "loading" ? "wait" : "pointer",
+        fontSize: 11,
+        color: "var(--ink-2)",
+      }}
+    >
+      {state.s === "loading"
+        ? "◴ capturing…"
+        : state.s === "error"
+          ? `⚠ ${state.msg} — retry`
+          : "◎ Capture actual response (~10× cost)"}
+    </button>
+  );
+}
+
 function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [openId, setOpenId] = useState<string | null>(null);
@@ -292,6 +408,7 @@ function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
 
   return (
     <div>
+      <MethodologyNote />
       <div className="tm-toolbar">
         <button className={segClass("all")} onClick={() => setFilter("all")}>
           All <span className="n">{counts.all}</span>
@@ -636,8 +753,14 @@ function PollBody({
   return (
     <div className="tm-qr-body">
       <div className="tm-answer">
-        <div className="lbl">
-          <span className="ai">{llmName.charAt(0)}</span> {llmName} answer · web search
+        <div
+          className="lbl"
+          style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
+        >
+          <span>
+            <span className="ai">{llmName.charAt(0)}</span> {llmName} answer · web search
+          </span>
+          {llm === "chatgpt" && <CaptureButton query={poll.query_text} />}
         </div>
         <div className="txt">
           {poll.full_response

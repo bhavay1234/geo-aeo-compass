@@ -172,6 +172,33 @@ function normalizeScraper(raw: unknown): OpenAIPollResult {
   };
 }
 
+/**
+ * OPT-IN, ON-DEMAND capture of ChatGPT's actual response via the DFS LLM
+ * Scraper — returns DFS's `check_url` (a shareable link to the captured cold
+ * session) plus source/answer sizes. This is the ~10× "UI capture" path, run
+ * only when the operator explicitly asks for a client-facing proof artifact;
+ * the audit itself stays on the cheap OpenAI/llm_responses pollers.
+ */
+export async function captureChatGPT(
+  query: string,
+  env: Env
+): Promise<{ check_url: string | null; sources: number; answer_chars: number }> {
+  const data = (await callDFS(
+    '/ai_optimization/chat_gpt/llm_scraper/live/advanced',
+    [{ keyword: query, location_code: 2840, language_code: 'en', force_web_search: true }],
+    env,
+    150_000
+  )) as AnyObj;
+  const tasks = (data?.tasks as AnyObj[] | undefined) ?? [];
+  const r0 = (((tasks[0]?.result as AnyObj[] | undefined) ?? [])[0] ?? {}) as AnyObj;
+  const sources = (r0.sources as AnyObj[] | undefined) ?? [];
+  return {
+    check_url: typeof r0.check_url === 'string' ? r0.check_url : null,
+    sources: sources.length,
+    answer_chars: typeof r0.markdown === 'string' ? (r0.markdown as string).length : 0,
+  };
+}
+
 export async function pollPerplexity(
   query: string,
   env: Env
