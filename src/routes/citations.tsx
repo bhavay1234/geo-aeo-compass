@@ -8,6 +8,7 @@ import {
   categorizeCitations,
   type SourceTagKind,
 } from "@/components/terminal/derive";
+import { normalizeDomain } from "@/lib/audit/source-classifier";
 import type { CitationCategory } from "@/lib/audit/source-classifier";
 import type {
   Audit,
@@ -232,6 +233,81 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   const groups = categorizeCitations(audit, visibleEntries);
   const totalVisible = visibleEntries.length;
 
+  // AEO lens: you can only "get listed" on third-party surfaces (roundups,
+  // directories, editorial, community). Vendor/competitor sites are landscape —
+  // you can't add yourself to a rival's homepage. Split accordingly.
+  const ACTIONABLE = new Set<CitationCategory>([
+    "listicles",
+    "reviews",
+    "editorial",
+    "pr",
+    "reddit",
+    "youtube",
+    "linkedin",
+    "community",
+  ]);
+  const actionableGroups = groups.filter((g) => ACTIONABLE.has(g.key));
+  const landscapeGroups = groups.filter((g) => !ACTIONABLE.has(g.key));
+  const actionableMissing = actionableGroups.reduce((n, g) => n + g.missing, 0);
+  // The worklist: get-listable sources you're missing, ranked by cross-LLM
+  // leverage (cited by more LLMs / more queries = higher payoff to land).
+  const topTargets = actionableGroups
+    .flatMap((g) => g.entries.filter((e) => !e.brand_present).map((e) => ({ e, label: g.label })))
+    .sort(
+      (a, b) =>
+        (b.e.llms_citing?.length ?? 0) - (a.e.llms_citing?.length ?? 0) ||
+        b.e.query_count - a.e.query_count
+    )
+    .slice(0, 8);
+  // Own-site signal: pages on YOUR domain the LLMs cite directly (strongest AEO
+  // proof), plus total sources that mention you.
+  const ownNorm = normalizeDomain(audit.domain);
+  const ownDomainCited = visibleEntries.filter(
+    (e) => e.source_type === "own" || normalizeDomain(e.domain) === ownNorm
+  ).length;
+
+  const groupSection = (g: (typeof groups)[number], muted: boolean) => {
+    const open = openKey === g.key;
+    return (
+      <div key={g.key}>
+        <button
+          type="button"
+          onClick={() => setOpenKey(open ? null : g.key)}
+          className="tm-phead"
+          style={{
+            cursor: "pointer",
+            width: "100%",
+            border: "none",
+            background: "transparent",
+            textAlign: "left",
+            opacity: muted && !open ? 0.72 : 1,
+          }}
+          aria-expanded={open}
+        >
+          <h2>
+            <span className="mono" style={{ color: "var(--ink-3)", marginRight: 8, fontSize: 13 }}>
+              {open ? "▾" : "▸"}
+            </span>
+            {g.label}
+          </h2>
+          <span className="meta">
+            {g.total} source{g.total === 1 ? "" : "s"}
+            {g.missing > 0 && (
+              <span style={{ color: "var(--hot)" }}> · {g.missing} missing you</span>
+            )}
+          </span>
+        </button>
+        {open && (
+          <div className="tm-rows">
+            {g.entries.map((e, i) => (
+              <Row key={e.url} e={e} rank={i + 1} llmCount={llmCount} title={titleByUrl.get(e.url) ?? ""} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div>
       <div
@@ -284,17 +360,42 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
           )}
         </p>
         <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 6 }}>
-          Where the LLMs source their answers, and whether you're on the page.
-          {polledLlms.length > 1
-            ? " Sources cited by multiple LLMs are the highest-leverage places to get listed."
-            : " Missing aggregators & review directories are your get-listed worklist."}
+          Two things that matter for AEO: <b>where to get listed</b> (third-party
+          surfaces you're missing) and <b>your own-site signal</b>. Vendor &
+          competitor sites are landscape — you can't list yourself there.
           {deadCount > 0 && (
-            <span style={{ color: "var(--ink-3)" }}>
-              {" "}
-              {deadCount} dead link{deadCount === 1 ? "" : "s"} hidden.
-            </span>
+            <span> {deadCount} dead link{deadCount === 1 ? "" : "s"} hidden.</span>
           )}
         </p>
+
+        {/* Own-site signal — the strongest AEO proof is your own pages being cited. */}
+        <div
+          style={{
+            marginTop: 14,
+            padding: "12px 14px",
+            borderRadius: 6,
+            border: "1px solid var(--grid-2)",
+            background: ownDomainCited > 0 ? "var(--pos-bg)" : "var(--hot-bg)",
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+            {ownDomainCited > 0 ? (
+              <>
+                ◆ Own-site signal: strong — the LLMs cite{" "}
+                <b>{ownDomainCited}</b> page{ownDomainCited === 1 ? "" : "s"} on your
+                own domain directly.
+              </>
+            ) : (
+              <>⚠ Own-site signal: weak — none of your own pages are cited by the LLMs.</>
+            )}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--ink-2)", marginTop: 3 }}>
+            You're named on {present.length} of {totalVisible} cited sources.{" "}
+            {ownDomainCited > 0
+              ? "Keep those pages authoritative; then close the get-listed gaps below."
+              : "Publish authoritative pages the LLMs will cite, and get onto the third-party sources below."}
+          </div>
+        </div>
       </div>
 
       {/* View toggle — all sources grouped, or filtered to one LLM's citations. */}
@@ -337,95 +438,46 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         </div>
       )}
 
-      {/* Category overview — where the LLMs pull from, clubbed into buckets. */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: 8,
-          padding: "14px 20px",
-          borderBottom: "1px solid var(--grid-2)",
-        }}
-      >
-        {groups.map((g) => {
-          const active = openKey === g.key;
-          return (
-            <button
-              key={g.key}
-              type="button"
-              onClick={() => setOpenKey(active ? null : g.key)}
-              className="tm-badge"
-              style={{
-                cursor: "pointer",
-                border: active ? "1px solid var(--ink-3)" : "1px solid transparent",
-                background: active ? "var(--panel)" : "var(--panel-2)",
-                color: "var(--ink-2)",
-                fontSize: 11.5,
-              }}
-              title={`${g.total} source${g.total === 1 ? "" : "s"}${
-                g.missing > 0 ? ` · ${g.missing} missing you` : ""
-              } — click to ${active ? "collapse" : "expand"}`}
-            >
-              {g.label} <b style={{ color: "var(--ink)" }}>{g.total}</b>
-              {g.missing > 0 && (
-                <span style={{ color: "var(--hot)" }}> · {g.missing} missing</span>
-              )}
-            </button>
-          );
-        })}
+      {/* ── WHERE TO GET LISTED ── the actionable worklist. */}
+      <div className="tm-phead" style={{ borderTop: "none" }}>
+        <h2 style={{ color: "var(--hot)" }}>⚑ Where to get listed</h2>
+        <span className="meta">
+          {actionableMissing} third-party source{actionableMissing === 1 ? "" : "s"} you're
+          missing · highest-leverage first
+        </span>
       </div>
 
-      {/* Collapsed by default — click a category header (or its chip above) to
-          open it. Single-open accordion keeps the long list navigable. */}
-      {groups.map((g) => {
-        const open = openKey === g.key;
-        return (
-          <div key={g.key}>
-            <button
-              type="button"
-              onClick={() => setOpenKey(open ? null : g.key)}
-              className="tm-phead"
-              style={{
-                cursor: "pointer",
-                width: "100%",
-                border: "none",
-                background: "transparent",
-                textAlign: "left",
-              }}
-              aria-expanded={open}
-            >
-              <h2>
-                <span
-                  className="mono"
-                  style={{ color: "var(--ink-3)", marginRight: 8, fontSize: 13 }}
-                >
-                  {open ? "▾" : "▸"}
-                </span>
-                {g.label}
-              </h2>
-              <span className="meta">
-                {g.total} source{g.total === 1 ? "" : "s"}
-                {g.missing > 0 && (
-                  <span style={{ color: "var(--hot)" }}> · {g.missing} missing you</span>
-                )}
-              </span>
-            </button>
-            {open && (
-              <div className="tm-rows">
-                {g.entries.map((e, i) => (
-                  <Row
-                    key={e.url}
-                    e={e}
-                    rank={i + 1}
-                    llmCount={llmCount}
-                    title={titleByUrl.get(e.url) ?? ""}
-                  />
-                ))}
-              </div>
-            )}
+      {topTargets.length > 0 && (
+        <div className="tm-rows">
+          {topTargets.map(({ e, label }, i) => (
+            <Row
+              key={e.url}
+              e={e}
+              rank={i + 1}
+              llmCount={llmCount}
+              title={`${titleByUrl.get(e.url) || e.domain}  ·  ${label}`}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Full actionable breakdown by category (collapsed). */}
+      <div style={{ borderTop: "1px solid var(--grid-2)" }}>
+        {actionableGroups.map((g) => groupSection(g, false))}
+      </div>
+
+      {/* ── LANDSCAPE ── vendor + competitor sites: intel, not get-listable. */}
+      {landscapeGroups.length > 0 && (
+        <>
+          <div className="tm-phead" style={{ background: "var(--panel-2)" }}>
+            <h2 style={{ color: "var(--ink-3)" }}>◱ Competitive landscape</h2>
+            <span className="meta">
+              vendor & competitor sites — for intel, you can't list yourself here
+            </span>
           </div>
-        );
-      })}
+          {landscapeGroups.map((g) => groupSection(g, true))}
+        </>
+      )}
     </div>
   );
 }
