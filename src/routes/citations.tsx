@@ -401,33 +401,23 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
 
   // The worklist: get-listable DEEP pages you're missing, ranked by cross-LLM
   // leverage (cited by more LLMs / more queries = higher payoff to land).
-  // Universal blind spots — cited by ALL polled LLMs but missing you. Highest ROI
-  // (every engine agrees this source matters). Get-listable surfaces only. These
-  // are FEATURED separately, so we exclude them from the main worklist below to
-  // avoid showing the same page twice.
-  const universalTargets = actionableGroups
-    .flatMap((g) => g.entries.map((e) => ({ e, label: g.label })))
-    .filter(
-      ({ e }) => !e.brand_present && (e.llms_citing?.length ?? 0) >= polledLlms.length && polledLlms.length > 1
-    )
-    .sort((a, b) => b.e.query_count - a.e.query_count)
-    .slice(0, 6);
-  const universalUrls = new Set(
-    universalTargets.map(({ e }) => e.resolved_url || e.url)
-  );
-
+  // The get-listed worklist: get-listable DEEP pages you're missing, ranked by
+  // cross-LLM leverage. "Universal blind spots" (cited by ALL polled LLMs) are
+  // simply the highest-leverage rows, so they lead this ONE list (badged
+  // UNIVERSAL by the Row) rather than living in a separate, duplicative section.
   const topTargets = actionableGroups
     .flatMap((g) =>
       g.entries.filter((e) => !e.brand_present).map((e) => ({ e, key: g.key, label: g.label }))
     )
-    // Drop the universal blind spots — they lead their own section above.
-    .filter(({ e }) => !universalUrls.has(e.resolved_url || e.url))
     .sort(
       (a, b) =>
         (b.e.llms_citing?.length ?? 0) - (a.e.llms_citing?.length ?? 0) ||
         b.e.query_count - a.e.query_count
     )
-    .slice(0, 8);
+    .slice(0, 10);
+  const universalCount = topTargets.filter(
+    ({ e }) => (e.llms_citing?.length ?? 0) >= polledLlms.length && polledLlms.length > 1
+  ).length;
 
   // Own-site signal: pages on YOUR domain the LLMs cite directly (strongest AEO
   // proof), plus total sources that mention you.
@@ -665,37 +655,16 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         </div>
       )}
 
-      {/* ── UNIVERSAL BLIND SPOTS ── every LLM cites it, you're missing. Top ROI. */}
-      {universalTargets.length > 0 && (
-        <>
-          <div className="tm-phead" style={{ borderTop: "none", background: "var(--hot-bg)" }}>
-            <h2 style={{ color: "var(--hot)" }}>🎯 Universal blind spots</h2>
-            <span className="meta">
-              cited by all {polledLlms.length} LLMs but missing you — land these first
-            </span>
-          </div>
-          <div className="tm-rows">
-            {universalTargets.map(({ e, label }, i) => (
-              <Row
-                key={e.url}
-                e={e}
-                rank={i + 1}
-                llmCount={llmCount}
-                title={`${titleByUrl.get(e.url) || e.domain}  ·  ${label}`}
-                query={queryFor(e.url)}
-                reason={e.get_listed_reason}
-              />
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* ── WHERE TO GET LISTED ── the actionable worklist (deep pages only). */}
-      <div className="tm-phead" style={universalTargets.length > 0 ? undefined : { borderTop: "none" }}>
+      {/* ── WHERE TO GET LISTED ── one worklist; all-LLM "universal" blind spots
+          lead (badged), then the rest by cross-LLM leverage. */}
+      <div className="tm-phead" style={{ borderTop: "none" }}>
         <h2 style={{ color: "var(--hot)" }}>⚑ Where to get listed</h2>
         <span className="meta">
           {actionableMissing} third-party page{actionableMissing === 1 ? "" : "s"} you're
-          missing · highest-leverage first
+          missing
+          {universalCount > 0
+            ? ` · ${universalCount} cited by all ${polledLlms.length} LLMs — land these first`
+            : " · highest-leverage first"}
           {homepagesHidden > 0 && ` · ${homepagesHidden} homepage${
             homepagesHidden === 1 ? "" : "s"
           } hidden`}
