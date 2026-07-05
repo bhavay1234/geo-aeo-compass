@@ -536,6 +536,119 @@ export interface SovEntry {
   isYou: boolean;
 }
 
+export interface CompetitorRow {
+  name: string;
+  domain: string;
+  isYou: boolean;
+  /** Share-of-recommendations % (the "visibility" column). */
+  visibilityPct: number;
+  /** Average rank in answers where named (1 = named first); null if never ranked. */
+  avgPosition: number | null;
+  /** Distinct queries where named. */
+  citedIn: number;
+}
+
+/**
+ * Per-brand comparison table (you + competitors): visibility share, average
+ * answer position, and query breadth. Variants are already merged by
+ * computeShareOfVoice; positions are aggregated on the same canonical key.
+ */
+export function buildCompetitorTable(audit: Audit, polls: PollResult[]): CompetitorRow[] {
+  const sov = computeShareOfVoice(audit, polls);
+  const allNames = [audit.brand_name, ...(audit.competitors ?? [])];
+  for (const p of polls) for (const c of p.competitors_cited ?? []) allNames.push(c.name);
+  const canon = buildBrandCanonicalizer(allNames);
+  const keyOf = (n: string) =>
+    (canon.get((n || "").trim().toLowerCase()) ?? n.trim()).toLowerCase();
+
+  const pos = new Map<string, { sum: number; n: number }>();
+  const addPos = (name: string, position: number | null | undefined) => {
+    if (!position || position < 1) return;
+    const k = keyOf(name);
+    const e = pos.get(k) ?? { sum: 0, n: 0 };
+    e.sum += position;
+    e.n += 1;
+    pos.set(k, e);
+  };
+  for (const p of polls) {
+    if (p.brand_cited && p.brand_position) addPos(audit.brand_name, p.brand_position);
+    for (const c of p.competitors_cited ?? []) addPos(c.name, c.position);
+  }
+
+  return sov.map((s) => {
+    const pe = pos.get(keyOf(s.name));
+    return {
+      name: s.name,
+      domain: s.domain ?? competitorToDomain(s.name),
+      isYou: s.isYou,
+      visibilityPct: s.pct,
+      avgPosition: pe && pe.n ? Math.round((pe.sum / pe.n) * 10) / 10 : null,
+      citedIn: s.count,
+    };
+  });
+}
+
+export interface DomainRow {
+  domain: string;
+  type: string;
+  /** Share of all cited sources that come from this domain (%). */
+  used: number;
+  count: number;
+  llms: number;
+}
+export interface TypeSlice {
+  label: string;
+  key: CitationCategory;
+  pct: number;
+  count: number;
+}
+
+/**
+ * Domain usage + source-type breakdown from the citation analysis — mirrors the
+ * "Domains" table and "Domains by Type" ring on a tracking dashboard.
+ */
+export function buildDomainStats(
+  audit: Audit,
+  entries: CitationAnalysisEntry[]
+): { domains: DomainRow[]; byType: TypeSlice[] } {
+  const comp = competitorDomainSet(audit);
+  const total = entries.length || 1;
+  const byDomain = new Map<
+    string,
+    { count: number; cat: CitationCategory; llms: Set<string> }
+  >();
+  const byCat = new Map<CitationCategory, number>();
+  for (const e of entries) {
+    const cat = citationCategory(e.resolved_url || e.url, e.domain, e.source_type, comp);
+    byCat.set(cat, (byCat.get(cat) ?? 0) + 1);
+    const d = normalizeDomain(e.domain);
+    if (!d) continue;
+    const ex = byDomain.get(d) ?? { count: 0, cat, llms: new Set<string>() };
+    ex.count += 1;
+    for (const l of e.llms_citing ?? []) ex.llms.add(l);
+    byDomain.set(d, ex);
+  }
+  const domains: DomainRow[] = Array.from(byDomain.entries())
+    .map(([domain, v]) => ({
+      domain,
+      type: CITATION_CATEGORY_META[v.cat].label,
+      used: Math.round((v.count / total) * 100),
+      count: v.count,
+      llms: v.llms.size,
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
+  const byType: TypeSlice[] = Array.from(byCat.entries())
+    .map(([key, count]) => ({
+      key,
+      label: CITATION_CATEGORY_META[key].label,
+      pct: Math.round((count / total) * 100),
+      count,
+    }))
+    .sort((a, b) => b.count - a.count);
+  return { domains, byType };
+}
+
 /**
  * Share of RECOMMENDATIONS across queries — the share a buyer understands:
  * "of all the products the LLMs collectively name, how often is it you vs each

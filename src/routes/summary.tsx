@@ -6,6 +6,8 @@ import {
   buildGapRows,
   buildLlmScorecards,
   computeShareOfVoice,
+  buildCompetitorTable,
+  buildDomainStats,
   llmsPolled,
   topGetListedTargets,
   type GapRow,
@@ -103,6 +105,18 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const getListed = topGetListedTargets(audit, citeEntries, titleByUrl, 6);
   const citationsAnalyzing =
     audit.citation_status === "analyzing" || audit.citation_status == null;
+  const compTable = buildCompetitorTable(audit, polls);
+  const { domains: domainRows, byType } = buildDomainStats(audit, citeEntries);
+  const TYPE_COLORS = [
+    "var(--you)",
+    "var(--hot)",
+    "var(--warn)",
+    "var(--pos)",
+    "var(--ink-3)",
+    "#8b5cf6",
+    "#0891b2",
+    "#db2777",
+  ];
 
   // total = distinct queries (one per gap row after per-query aggregation).
   // Per-LLM answers = queries × LLMs — the buyer-facing denominator on multi-LLM
@@ -452,6 +466,129 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
           ))
         )}
       </div>
+
+      {/* COMPETITOR COMPARISON — you vs rivals: visibility share + avg position. */}
+      {compTable.length > 0 && (
+        <div style={{ padding: "16px 20px 18px", borderBottom: "1px solid var(--grid-2)", background: "var(--bg)" }}>
+          <h2
+            style={{
+              fontSize: 12,
+              fontWeight: 800,
+              letterSpacing: ".06em",
+              textTransform: "uppercase",
+              color: "var(--ink-2)",
+              margin: "0 0 10px",
+            }}
+          >
+            ◑ Competitors · you vs the field
+          </h2>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ color: "var(--ink-3)", textAlign: "left" }}>
+                  <th style={{ padding: "4px 8px 8px", fontWeight: 700 }}>Brand</th>
+                  <th style={{ padding: "4px 8px 8px", fontWeight: 700, width: 220 }}>Visibility</th>
+                  <th style={{ padding: "4px 8px 8px", fontWeight: 700, width: 90 }}>Avg position</th>
+                  <th style={{ padding: "4px 8px 8px", fontWeight: 700, width: 70 }}>Queries</th>
+                </tr>
+              </thead>
+              <tbody>
+                {compTable.map((c) => (
+                  <tr
+                    key={c.name}
+                    style={{
+                      borderTop: "1px solid var(--grid)",
+                      background: c.isYou ? "var(--panel-2)" : "transparent",
+                    }}
+                  >
+                    <td style={{ padding: "8px" }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                        <Favicon domain={c.domain} size={16} />
+                        <span style={{ fontWeight: c.isYou ? 800 : 600, color: c.isYou ? "var(--you)" : "var(--ink)" }}>
+                          {c.name}
+                        </span>
+                        {c.isYou && <span className="tm-badge" style={{ background: "var(--panel)", color: "var(--you)" }}>you</span>}
+                      </span>
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span className="mono" style={{ width: 34, color: "var(--ink-2)" }}>{c.visibilityPct}%</span>
+                        <span style={{ flex: 1, height: 6, background: "var(--grid)", borderRadius: 3, overflow: "hidden", maxWidth: 150 }}>
+                          <span style={{ display: "block", height: "100%", width: `${c.visibilityPct}%`, background: c.isYou ? "var(--you)" : "var(--ink-3)" }} />
+                        </span>
+                      </span>
+                    </td>
+                    <td style={{ padding: "8px" }} className="mono">
+                      {c.avgPosition != null ? c.avgPosition.toFixed(1) : "—"}
+                    </td>
+                    <td style={{ padding: "8px" }} className="mono">{c.citedIn}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* DOMAINS + SOURCES BY TYPE — where the models pull from, and the mix. */}
+      {domainRows.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1.6fr 1fr",
+            borderBottom: "1px solid var(--grid-2)",
+          }}
+        >
+          <div style={{ padding: "16px 20px 18px", borderRight: "1px solid var(--grid)", background: "var(--bg)" }}>
+            <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--ink-2)", margin: "0 0 10px" }}>
+              ⛁ Top source domains
+            </h2>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ color: "var(--ink-3)", textAlign: "left" }}>
+                  <th style={{ padding: "4px 8px 8px", fontWeight: 700 }}>Domain</th>
+                  <th style={{ padding: "4px 8px 8px", fontWeight: 700, width: 130 }}>Type</th>
+                  <th style={{ padding: "4px 8px 8px", fontWeight: 700, width: 80 }}>Used</th>
+                </tr>
+              </thead>
+              <tbody>
+                {domainRows.map((d) => (
+                  <tr key={d.domain} style={{ borderTop: "1px solid var(--grid)" }}>
+                    <td style={{ padding: "8px" }}>
+                      <a href={`https://${d.domain}/`} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "var(--ink)", textDecoration: "none" }}>
+                        <Favicon domain={d.domain} size={16} />
+                        {d.domain}
+                      </a>
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      <span className="tm-badge" style={{ background: "var(--panel-2)", color: "var(--ink-2)" }}>{d.type}</span>
+                    </td>
+                    <td style={{ padding: "8px" }} className="mono">{d.used}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ padding: "16px 20px 18px", background: "var(--bg)" }}>
+            <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--ink-2)", margin: "0 0 10px" }}>
+              Sources by type
+            </h2>
+            {/* Stacked bar as the "by type" mix. */}
+            <div style={{ display: "flex", height: 12, borderRadius: 4, overflow: "hidden", marginBottom: 12 }}>
+              {byType.map((t, i) => (
+                <span key={t.key} title={`${t.label} ${t.pct}%`} style={{ width: `${t.pct}%`, background: TYPE_COLORS[i % TYPE_COLORS.length] }} />
+              ))}
+            </div>
+            {byType.map((t, i) => (
+              <div key={t.key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, fontSize: 12 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: TYPE_COLORS[i % TYPE_COLORS.length], flexShrink: 0 }} />
+                <span style={{ flex: 1, color: "var(--ink-2)" }}>{t.label}</span>
+                <span className="mono" style={{ color: "var(--ink-3)" }}>{t.pct}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="tm-grid">
         {/* FOCAL: visibility gaps */}
