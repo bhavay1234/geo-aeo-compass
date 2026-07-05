@@ -38,6 +38,46 @@ export const Route = createFileRoute("/summary")({
   component: SummaryPage,
 });
 
+/** Visibility-over-runs line chart (own brand) — a fuller, dated trend than the
+ *  trajectory sparkline. Competitor lines will layer in once per-run SoV
+ *  snapshots accumulate across audits. */
+function TrendChart({ scores, dates }: { scores: number[]; dates: string[] }) {
+  const w = 680;
+  const h = 150;
+  const padX = 10;
+  const padY = 14;
+  const n = scores.length;
+  const x = (i: number) => padX + (n <= 1 ? 0 : (i / (n - 1)) * (w - 2 * padX));
+  const y = (v: number) => h - padY - (Math.max(0, Math.min(100, v)) / 100) * (h - 2 * padY);
+  const line = scores.map((s, i) => `${x(i).toFixed(1)},${y(s).toFixed(1)}`).join(" ");
+  const area = `${x(0).toFixed(1)},${(h - padY).toFixed(1)} ${line} ${x(n - 1).toFixed(1)},${(h - padY).toFixed(1)}`;
+  const fmt = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    } catch {
+      return "";
+    }
+  };
+  return (
+    <div>
+      <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} preserveAspectRatio="none" style={{ display: "block" }}>
+        {[0, 25, 50, 75, 100].map((g) => (
+          <line key={g} x1={padX} x2={w - padX} y1={y(g)} y2={y(g)} stroke="var(--grid)" strokeWidth={1} />
+        ))}
+        <polygon points={area} fill="var(--you)" opacity={0.1} />
+        <polyline points={line} fill="none" stroke="var(--you)" strokeWidth={2.5} strokeLinejoin="round" />
+        {scores.map((s, i) => (
+          <circle key={i} cx={x(i)} cy={y(s)} r={3.5} fill="var(--you)" stroke="var(--bg)" strokeWidth={1.5} />
+        ))}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+        <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>{fmt(dates[0])}</span>
+        <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>{fmt(dates[dates.length - 1])}</span>
+      </div>
+    </div>
+  );
+}
+
 type Metric = "visibility" | "sentiment" | "position";
 
 /** Tabbed competitor comparison — Visibility / Sentiment / Position, mirroring a
@@ -266,6 +306,7 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
         new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
   const scores = runs.map((r) => r.visibility_score as number);
+  const trendDates = runs.map((r) => r.created_at as string);
   const score = audit.visibility_score ?? 0;
   const delta =
     scores.length >= 2 ? score - scores[scores.length - 2] : null;
@@ -358,6 +399,27 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
           {verdict}
         </p>
       </div>
+
+      {/* VISIBILITY TREND — own-brand visibility index across runs. */}
+      {scores.length >= 2 && (
+        <div style={{ padding: "16px 20px 14px", borderBottom: "1px solid var(--grid-2)", background: "var(--bg)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+            <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--ink-2)", margin: 0 }}>
+              ◰ Visibility trend
+            </h2>
+            <InfoTip text="Your visibility index (0–100, named-in-answer rate across queries) for each completed run of this brand, oldest → newest. Re-run the audit periodically to track whether your AI presence is improving. Competitor lines will layer in as more runs accumulate." />
+            <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", marginLeft: "auto" }}>
+              {runs.length} runs · now {score}/100
+              {delta != null && (
+                <b style={{ marginLeft: 6, color: delta >= 0 ? "var(--pos)" : "var(--hot)" }}>
+                  {delta >= 0 ? `▲ +${delta}` : `▼ ${delta}`}
+                </b>
+              )}
+            </span>
+          </div>
+          <TrendChart scores={scores} dates={trendDates} />
+        </div>
+      )}
 
       {/* Per-LLM scorecards — individual visibility per engine, never merged. */}
       {llms.length > 1 && (
