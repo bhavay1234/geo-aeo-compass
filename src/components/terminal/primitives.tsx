@@ -1,7 +1,78 @@
+import { useState } from "react";
+import type { LlmSource } from "@/lib/db/types";
+import { normalizeDomain } from "@/lib/audit/source-classifier";
 import type { QueryState, SourceTagKind } from "./derive";
 
 export function BrandMark({ label }: { label: string }) {
   return <span className="tm-mark">{label}</span>;
+}
+
+/**
+ * Favicon for a domain — rendered in the VIEWER's browser via Google's favicon
+ * service. Falls back to a first-letter tile if the icon fails to load. Makes
+ * citation/competitor/source rows read as concrete brands, not bare URLs.
+ */
+export function Favicon({
+  domain,
+  size = 16,
+}: {
+  domain: string;
+  size?: number;
+}) {
+  const d = normalizeDomain(domain || "");
+  const [ok, setOk] = useState(true);
+  if (!d) return null;
+  if (!ok) {
+    return (
+      <span
+        aria-hidden
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: size,
+          height: size,
+          borderRadius: 3,
+          background: "var(--panel-2)",
+          color: "var(--ink-3)",
+          fontSize: size * 0.62,
+          fontWeight: 800,
+          flexShrink: 0,
+          verticalAlign: "middle",
+        }}
+      >
+        {d.charAt(0).toUpperCase()}
+      </span>
+    );
+  }
+  return (
+    <img
+      src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(d)}&sz=64`}
+      width={size}
+      height={size}
+      loading="lazy"
+      alt=""
+      aria-hidden
+      onError={() => setOk(false)}
+      style={{
+        borderRadius: 3,
+        flexShrink: 0,
+        verticalAlign: "middle",
+        background: "var(--panel-2)",
+        objectFit: "contain",
+      }}
+    />
+  );
+}
+
+/** Brand mark for an LLM, via its site's favicon (OpenAI / Perplexity / Gemini). */
+const LLM_DOMAIN: Record<LlmSource, string> = {
+  chatgpt: "openai.com",
+  perplexity: "perplexity.ai",
+  gemini: "gemini.google.com",
+};
+export function LlmIcon({ llm, size = 14 }: { llm: LlmSource; size?: number }) {
+  return <Favicon domain={LLM_DOMAIN[llm]} size={size} />;
 }
 
 export function StatePill({ state }: { state: QueryState }) {

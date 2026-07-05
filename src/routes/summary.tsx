@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Workspace, useWorkspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
-import { BleedBar, StatePill, Sparkline } from "@/components/terminal/primitives";
+import { BleedBar, StatePill, Sparkline, Favicon, LlmIcon } from "@/components/terminal/primitives";
 import {
   buildGapRows,
   buildLlmScorecards,
@@ -265,7 +265,8 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
                 animationDelay: `${i * 0.05}s`,
               }}
             >
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <LlmIcon llm={s.llm} size={16} />
                 <span
                   className="mono"
                   style={{
@@ -416,6 +417,7 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
               <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)", width: 18 }}>
                 {String(i + 1).padStart(2, "0")}
               </span>
+              <Favicon domain={t.domain} size={16} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <a
                   href={t.url}

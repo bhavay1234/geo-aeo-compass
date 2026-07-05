@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Workspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
-import { PositionDots, SourceTag } from "@/components/terminal/primitives";
+import { PositionDots, SourceTag, Favicon, LlmIcon } from "@/components/terminal/primitives";
 import {
   queryState,
   aggregateQueryState,
@@ -13,7 +13,7 @@ import {
   normalizeLlm,
   type QueryState,
 } from "@/components/terminal/derive";
-import { normalizeDomain, citationCategory } from "@/lib/audit/source-classifier";
+import { normalizeDomain, citationCategory, competitorToDomain } from "@/lib/audit/source-classifier";
 import type {
   Audit,
   PollResult,
@@ -58,6 +58,7 @@ function InfluenceBlock({ w, llmName }: { w: WhyNamed; llmName: string }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <Favicon domain={competitorToDomain(w.brand)} size={16} />
         <b style={{ fontSize: 14, color: "var(--ink)" }}>{w.brand}</b>
         <span className="tm-badge" style={{ background: "var(--neg-bg)", color: "var(--neg)" }}>
           recommended by {llmName}
@@ -85,9 +86,16 @@ function InfluenceBlock({ w, llmName }: { w: WhyNamed; llmName: string }) {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="tm-chip"
-                style={{ textDecoration: "none", marginRight: 4 }}
+                style={{
+                  textDecoration: "none",
+                  marginRight: 4,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
                 title={s.url}
               >
+                <Favicon domain={s.domain} size={12} />
                 {s.domain}
               </a>
             ))}
@@ -573,8 +581,12 @@ function QueryRow({
                       borderBottom: on ? "2px solid var(--ink)" : "2px solid transparent",
                       cursor: p ? "pointer" : "not-allowed",
                       fontFamily: "inherit",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
                     }}
                   >
+                    <LlmIcon llm={l} size={14} />
                     {LLM_LABEL[l]}
                     {p ? (
                       <span
@@ -721,8 +733,8 @@ function PollBody({
           className="lbl"
           style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}
         >
-          <span>
-            <span className="ai">{llmName.charAt(0)}</span> {llmName} answer · web search
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <LlmIcon llm={llm} size={15} /> {llmName} answer · web search
           </span>
           {llm === "chatgpt" && <OpenInChatGPT query={poll.query_text} />}
         </div>
@@ -812,10 +824,14 @@ function PollBody({
                 className="tm-chip"
                 title={r.tracked ? "tracked competitor" : "discovered — not on your list"}
                 style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
                   background: r.tracked ? "var(--neg-bg)" : "var(--panel-2)",
                   color: r.tracked ? "var(--neg)" : "var(--ink-2)",
                 }}
               >
+                <Favicon domain={competitorToDomain(r.name)} size={13} />
                 {r.name}
                 {!r.tracked && (
                   <small style={{ marginLeft: 5, opacity: 0.7, fontWeight: 700 }}>
@@ -861,6 +877,7 @@ function PollBody({
             return (
               <div className="tm-src" key={`${c.url}-${i}`}>
                 <span className="o">{i + 1}</span>
+                <Favicon domain={c.domain} size={14} />
                 <div className="d" style={{ minWidth: 0 }}>
                   <a
                     href={c.url}

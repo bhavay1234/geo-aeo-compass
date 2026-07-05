@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Workspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
-import { SourceTag } from "@/components/terminal/primitives";
+import { SourceTag, Favicon } from "@/components/terminal/primitives";
 import {
   llmsPolled,
   categorizeCitations,
@@ -106,6 +106,7 @@ function Row({
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <Favicon domain={e.domain} size={16} />
             {/* Page title — the real link text, not just the bare domain. */}
             <a
               href={link}
