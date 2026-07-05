@@ -189,7 +189,15 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const getListed = topGetListedTargets(audit, citeEntries, titleByUrl, 6);
   const citationsAnalyzing =
     audit.citation_status === "analyzing" || audit.citation_status == null;
-  const compTable = buildCompetitorTable(audit, polls);
+  const compTableFull = buildCompetitorTable(audit, polls);
+  // Cap at the top 10 by visibility, but always keep the brand's own row.
+  const compTable = (() => {
+    const head = compTableFull.slice(0, 10);
+    if (compTableFull.some((r) => r.isYou) && !head.some((r) => r.isYou)) {
+      return [...head.slice(0, 9), compTableFull.find((r) => r.isYou)!];
+    }
+    return head;
+  })();
   const { domains: domainRows, byType } = buildDomainStats(audit, citeEntries);
   const TYPE_COLORS = [
     "var(--you)",
