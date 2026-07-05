@@ -10,6 +10,7 @@ import {
   buildCompetitorTable,
   buildDomainStats,
   llmsPolled,
+  normalizeLlm,
   topGetListedTargets,
   type GapRow,
   type CompetitorRow,
@@ -192,7 +193,11 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const getListed = topGetListedTargets(audit, citeEntries, titleByUrl, 6);
   const citationsAnalyzing =
     audit.citation_status === "analyzing" || audit.citation_status == null;
-  const compTableFull = buildCompetitorTable(audit, polls);
+  // Per-model filter — recompute the competitor comparison for one LLM or all.
+  const [model, setModel] = useState<"all" | LlmSource>("all");
+  const modelPolls =
+    model === "all" ? polls : polls.filter((p) => normalizeLlm(p.llm_source) === model);
+  const compTableFull = buildCompetitorTable(audit, modelPolls);
   // Cap at the top 10 by visibility, but always keep the brand's own row.
   const compTable = (() => {
     const head = compTableFull.slice(0, 10);
@@ -565,6 +570,51 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
           ))
         )}
       </div>
+
+      {/* MODEL FILTER — recompute the comparison for one engine or all. */}
+      {compTable.length > 0 && llms.length > 1 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "10px 20px",
+            borderBottom: "1px solid var(--grid)",
+            background: "var(--bg)",
+          }}
+        >
+          <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", textTransform: "uppercase", letterSpacing: ".06em" }}>
+            Model
+          </span>
+          <div style={{ display: "inline-flex", gap: 4, padding: 3, background: "var(--panel-2)", borderRadius: 8 }}>
+            {(["all", ...llms] as const).map((opt) => {
+              const on = model === opt;
+              return (
+                <button
+                  key={opt}
+                  onClick={() => setModel(opt)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 5,
+                    border: "none",
+                    borderRadius: 6,
+                    padding: "4px 12px",
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    background: on ? "var(--bg)" : "transparent",
+                    color: on ? "var(--ink)" : "var(--ink-2)",
+                  }}
+                >
+                  {opt !== "all" && <LlmIcon llm={opt} size={13} />}
+                  {opt === "all" ? "All models" : LLM_LABEL[opt]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* METRIC TABS — Visibility / Sentiment / Position comparison. */}
       {compTable.length > 0 && <MetricComparison rows={compTable} />}
