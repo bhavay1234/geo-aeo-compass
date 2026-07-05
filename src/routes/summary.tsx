@@ -56,7 +56,7 @@ function SectionHead({ title, cta, to }: { title: string; cta?: string; to?: "/q
       <h2>{title}</h2>
       {cta && to && (
         <Link to={to} search={(prev) => ({ ...prev })} className="ov-cta">
-          {cta} <Icon name="arrow" size={14} />
+          {cta}
         </Link>
       )}
     </div>
@@ -67,9 +67,8 @@ function SectionHead({ title, cta, to }: { title: string; cta?: string; to?: "/q
 function EngineLine({ llm, cited }: { llm: LlmSource; cited: boolean }) {
   return (
     <div className="ov-engine">
-      <LlmIcon llm={llm} size={15} />
       <span className="e-name">{LLM_LABEL[llm]}</span>
-      <span className={`e-state ${cited ? "on" : "off"}`}>{cited ? "Cited" : "Missing"}</span>
+      <span className={`e-state ${cited ? "on" : "off"}`}>{cited ? "Mentioned" : "Missing"}</span>
     </div>
   );
 }
@@ -362,7 +361,7 @@ export function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[
         </section>
 
         <section className="ov-risk">
-          <span className="lbl">Commercial risk</span>
+          <span className="lbl">Category coverage</span>
           <p className="stmt">
             <b>{unwon}</b> high-intent prompt{unwon === 1 ? " is" : "s are"} currently unwon.
           </p>
@@ -394,7 +393,7 @@ export function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[
       {/* 3 · PRIMARY DIAGNOSIS */}
       {unwon > 0 && (
         <section className="ov-diag">
-          <span className="tag">You are losing category visibility</span>
+          <span className="tag">Category visibility gap</span>
           <h2>
             {brand} ranks {youRank > 0 ? `#${youRank}` : "outside the top brands"} overall, but is absent from the {catPhrase} prompts where buyers compare platforms.
           </h2>
@@ -412,7 +411,7 @@ export function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[
               </>
             )}
             <Link to="/queries" search={(prev) => ({ ...prev })} className="ov-cta" style={{ marginLeft: "auto" }}>
-              Inspect prompt evidence <Icon name="arrow" size={14} />
+              Open evidence
             </Link>
           </div>
         </section>
@@ -421,7 +420,7 @@ export function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[
       {/* 4 · WHERE YOU ARE LOSING */}
       {losing.length > 0 && (
         <section>
-          <SectionHead title="Where you are losing AI recommendations" cta={`View all ${unwon} gaps`} to="/queries" />
+          <SectionHead title="Priority prompt gaps" cta="View gaps" to="/queries" />
           <div className="ov-losing">
             {losing.map((r) => (
               <div className="ov-loserow" key={r.id}>
@@ -484,7 +483,7 @@ export function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[
         </section>
 
         <section className="ov-surface">
-          <SectionHead title="What changed" />
+          <SectionHead title="Changes since last audit" />
           <div className="ov-changes">
             {changes.length === 0 ? (
               <p className="note">No prior audit to compare against yet.</p>
@@ -506,7 +505,7 @@ export function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[
       {/* 6 · RECOMMENDED WORK */}
       {work.length > 0 && (
         <section>
-          <SectionHead title="Recommended work" cta="Action center" to="/actions" />
+          <SectionHead title="Recommended actions" cta="Action center" to="/actions" />
           <div className="ov-work">
             {work.map((w, i) => (
               <div className="ov-workrow" key={i}>
@@ -519,7 +518,7 @@ export function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[
                 <div className="meta">
                   <span className="status">Not started</span>
                   <Link to={w.to} search={(prev) => ({ ...prev })} className="ov-cta">
-                    View evidence <Icon name="arrow" size={13} />
+                    View evidence
                   </Link>
                 </div>
               </div>
@@ -562,7 +561,7 @@ export function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[
         </section>
 
         <section className="ov-surface">
-          <SectionHead title="Citation opportunities" cta="Explore" to="/citations" />
+          <SectionHead title="Citation opportunities" cta="View sources" to="/citations" />
           {sourceRows.length === 0 ? (
             <p className="note">{citationsAnalyzing ? "Analyzing cited sources…" : "No cited sources found yet."}</p>
           ) : (
