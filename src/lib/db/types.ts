@@ -259,6 +259,10 @@ export interface AuditInsights {
   // recurrence gate — a real rival named in ONE query still surfaces, while
   // wrong-category noise (BI tools, carriers) is dropped. Absent on old audits.
   competitor_brands?: ClassifiedCompetitor[];
+  /** Per-brand sentiment of HOW each brand is described across the answers —
+   *  0–100 (higher = more positive). Keyed by lowercased brand name. Absent on
+   *  audits run before sentiment analysis shipped. */
+  sentiment?: Record<string, { score: number; label: 'positive' | 'neutral' | 'negative' }>;
 }
 
 /** A discovered brand the classifier judged a real competitor of the audited

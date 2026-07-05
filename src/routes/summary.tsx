@@ -487,7 +487,8 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
               <thead>
                 <tr style={{ color: "var(--ink-3)", textAlign: "left" }}>
                   <th style={{ padding: "4px 8px 8px", fontWeight: 700 }}>Brand</th>
-                  <th style={{ padding: "4px 8px 8px", fontWeight: 700, width: 220 }}>Visibility</th>
+                  <th style={{ padding: "4px 8px 8px", fontWeight: 700, width: 200 }}>Visibility</th>
+                  <th style={{ padding: "4px 8px 8px", fontWeight: 700, width: 100 }}>Sentiment</th>
                   <th style={{ padding: "4px 8px 8px", fontWeight: 700, width: 90 }}>Avg position</th>
                   <th style={{ padding: "4px 8px 8px", fontWeight: 700, width: 70 }}>Queries</th>
                 </tr>
@@ -517,6 +518,27 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
                           <span style={{ display: "block", height: "100%", width: `${c.visibilityPct}%`, background: c.isYou ? "var(--you)" : "var(--ink-3)" }} />
                         </span>
                       </span>
+                    </td>
+                    <td style={{ padding: "8px" }}>
+                      {c.sentiment == null ? (
+                        <span className="mono" style={{ color: "var(--ink-3)" }}>—</span>
+                      ) : (
+                        <span
+                          className="mono"
+                          style={{
+                            fontWeight: 700,
+                            color:
+                              c.sentimentLabel === "positive"
+                                ? "var(--pos)"
+                                : c.sentimentLabel === "negative"
+                                  ? "var(--hot)"
+                                  : "var(--warn)",
+                          }}
+                          title={c.sentimentLabel ?? ""}
+                        >
+                          {c.sentiment}
+                        </span>
+                      )}
                     </td>
                     <td style={{ padding: "8px" }} className="mono">
                       {c.avgPosition != null ? c.avgPosition.toFixed(1) : "—"}

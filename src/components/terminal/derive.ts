@@ -546,6 +546,9 @@ export interface CompetitorRow {
   avgPosition: number | null;
   /** Distinct queries where named. */
   citedIn: number;
+  /** 0–100 sentiment of how the brand is described; null if not analyzed. */
+  sentiment: number | null;
+  sentimentLabel: "positive" | "neutral" | "negative" | null;
 }
 
 /**
@@ -555,11 +558,14 @@ export interface CompetitorRow {
  */
 export function buildCompetitorTable(audit: Audit, polls: PollResult[]): CompetitorRow[] {
   const sov = computeShareOfVoice(audit, polls);
-  const allNames = [audit.brand_name, ...(audit.competitors ?? [])];
+  const sentiment = audit.insights?.sentiment ?? {};
+  const allNames = [audit.brand_name, ...(audit.competitors ?? []), ...Object.keys(sentiment)];
   for (const p of polls) for (const c of p.competitors_cited ?? []) allNames.push(c.name);
   const canon = buildBrandCanonicalizer(allNames);
   const keyOf = (n: string) =>
     (canon.get((n || "").trim().toLowerCase()) ?? n.trim()).toLowerCase();
+  const sentByCanon = new Map<string, { score: number; label: "positive" | "neutral" | "negative" }>();
+  for (const [k, v] of Object.entries(sentiment)) sentByCanon.set(keyOf(k), v);
 
   const pos = new Map<string, { sum: number; n: number }>();
   const addPos = (name: string, position: number | null | undefined) => {
@@ -577,6 +583,7 @@ export function buildCompetitorTable(audit: Audit, polls: PollResult[]): Competi
 
   return sov.map((s) => {
     const pe = pos.get(keyOf(s.name));
+    const se = sentByCanon.get(keyOf(s.name));
     return {
       name: s.name,
       domain: s.domain ?? competitorToDomain(s.name),
@@ -584,6 +591,8 @@ export function buildCompetitorTable(audit: Audit, polls: PollResult[]): Competi
       visibilityPct: s.pct,
       avgPosition: pe && pe.n ? Math.round((pe.sum / pe.n) * 10) / 10 : null,
       citedIn: s.count,
+      sentiment: se ? se.score : null,
+      sentimentLabel: se ? se.label : null,
     };
   });
 }

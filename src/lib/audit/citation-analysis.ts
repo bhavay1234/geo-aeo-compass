@@ -13,6 +13,7 @@ import {
   mapWithConcurrency,
   inferInfluenceVerdict,
   judgeGetListedSources,
+  analyzeSentiment,
 } from '../llm/suggestions';
 import type {
   Citation,
@@ -45,6 +46,7 @@ type PollRow = {
   citation_roles: CitationRole[] | null;
   competitors_cited: { name: string }[] | null;
   brands_named: string[] | null;
+  full_response: string | null;
 };
 
 interface CachedPage {
@@ -338,7 +340,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   try {
   const { data: pollData } = await supabase
     .from('poll_results')
-    .select('id, query_text, llm_source, citations, citation_roles, competitors_cited, brands_named')
+    .select('id, query_text, llm_source, citations, citation_roles, competitors_cited, brands_named, full_response')
     .eq('audit_id', auditId);
   const polls = (pollData as PollRow[]) || [];
 
@@ -595,6 +597,20 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     const top = namedBrands(p, ownLower).slice(0, TOP_BRANDS_PER_QUERY);
     topByPoll.set(p.id, top);
     for (const b of top) analyzedBrands.set(b.toLowerCase(), b);
+  }
+
+  // Per-brand sentiment across the answers (you + named competitors) — merged
+  // into insights.sentiment. Non-fatal; the audit stands without it.
+  try {
+    const sentimentBrands = [you, ...Array.from(analyzedBrands.values())];
+    const answerTexts = polls.map((p) => p.full_response || '').filter(Boolean);
+    const sentiment = await analyzeSentiment({ brands: sentimentBrands, answers: answerTexts }, env);
+    if (Object.keys(sentiment).length > 0) {
+      const mergedInsights = { ...((audit.insights as object | null) ?? {}), sentiment };
+      await supabase.from('audits').update({ insights: mergedInsights }).eq('id', auditId);
+    }
+  } catch (e: any) {
+    console.error('[citations] sentiment failed (non-fatal):', e?.message);
   }
 
   // Factor 2 index: brand -> distinct cited URLs across the audit naming it.

@@ -564,6 +564,62 @@ export async function judgeGetListedSources(
  * disambiguating rewrites (the caller tolerates a keyword absent from the volume
  * map — it just carries volume 0). Returns [] when no key / on failure.
  */
+/**
+ * Sentiment of HOW each brand is portrayed across the AI answers — a 0–100
+ * score (0 = criticized, 55 ≈ neutrally listed, 100 = glowing). One low-cost
+ * gpt-4o-mini call over the concatenated answers. Keyed by lowercased brand.
+ * Returns {} on no key / failure so the audit is unaffected.
+ */
+export async function analyzeSentiment(
+  input: { brands: string[]; answers: string[] },
+  env: Env
+): Promise<Record<string, { score: number; label: 'positive' | 'neutral' | 'negative' }>> {
+  const out: Record<string, { score: number; label: 'positive' | 'neutral' | 'negative' }> = {};
+  const brands = Array.from(new Set(input.brands.map((b) => b.trim()).filter(Boolean))).slice(0, 12);
+  if (!env.OPENAI_API_KEY || brands.length === 0 || input.answers.length === 0) return out;
+  const corpus = input.answers.filter(Boolean).join('\n---\n').slice(0, 9000);
+  const system =
+    'You are a brand-sentiment analyst. For EACH brand, rate how positively it ' +
+    'is portrayed in the AI answers below, 0–100: 0 = criticized/negative, ' +
+    '~55 = neutrally listed or factual, 100 = glowing ("leader", "best", "top ' +
+    'choice", strong praise). Judge ONLY the language used about that brand. If ' +
+    'a brand is not discussed, omit it. Return ONLY JSON ' +
+    '{"brands":[{"name":string,"score":number}]}.';
+  const user = JSON.stringify({ brands, answers: corpus });
+  try {
+    const openai = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+    const completion = await withTimeout(
+      openai.chat.completions.create({
+        model: MODEL,
+        temperature: 0.1,
+        max_tokens: 500,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+      }),
+      20000
+    );
+    const parsed = JSON.parse(stripFences(completion.choices[0]?.message?.content || '')) as {
+      brands?: unknown;
+    };
+    if (Array.isArray(parsed.brands)) {
+      for (const b of parsed.brands as unknown[]) {
+        const o = b as { name?: unknown; score?: unknown };
+        const name = typeof o.name === 'string' ? o.name.trim() : '';
+        if (!name) continue;
+        const score =
+          typeof o.score === 'number' ? Math.max(0, Math.min(100, Math.round(o.score))) : 55;
+        const label = score >= 65 ? 'positive' : score >= 45 ? 'neutral' : 'negative';
+        out[name.toLowerCase()] = { score, label };
+      }
+    }
+  } catch (err: any) {
+    console.error('[sentiment] failed:', err?.message);
+  }
+  return out;
+}
+
 export async function selectBuyerQueries(
   input: {
     brandName: string;
