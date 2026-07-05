@@ -20,9 +20,7 @@ import type {
   Citation,
   LlmSource,
   WhyNamed,
-  YouInfluence,
   DecisiveFactor,
-  SourceType,
 } from "@/lib/db/types";
 
 const LLM_LABEL: Record<LlmSource, string> = {
@@ -46,110 +44,40 @@ const DECISIVE_LABEL: Record<DecisiveFactor, string> = {
   third_party: "Third-party presence",
   own_site: "Own-site signals",
 };
-const SRC_LABEL: Record<SourceType, string> = {
-  review_directory: "review",
-  analyst: "analyst",
-  editorial: "listicle/editorial",
-  competitor: "vendor",
-  own: "owned",
-  other: "source",
-};
 
-function Bar({ val, color, label }: { val: number; color: string; label: string }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
-      <span className="mono" style={{ fontSize: 9, width: 30, color: "var(--ink-3)" }}>
-        {label}
-      </span>
-      <div style={{ flex: 1, height: 6, background: "var(--grid)", borderRadius: 3, overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${Math.round(val * 100)}%`, background: color }} />
-      </div>
-      <span className="mono" style={{ fontSize: 9, width: 30, textAlign: "right", color: "var(--ink-3)" }}>
-        {Math.round(val * 100)}%
-      </span>
-    </div>
-  );
-}
 
-function FactorRow({
-  label,
-  x,
-  you,
-  primary,
-}: {
-  label: string;
-  x: number;
-  you: number;
-  primary?: boolean;
-}) {
+/** One competitor's influence, in plain language: why the LLM recommends it and
+ *  where it's cited — no jargon, no normalized bars. */
+function InfluenceBlock({ w, llmName }: { w: WhyNamed; llmName: string }) {
   return (
     <div
       style={{
-        marginTop: 8,
-        padding: primary ? "6px 8px" : "0 0 0 8px",
-        borderLeft: primary ? "2px solid var(--warn)" : "2px solid var(--grid)",
-        background: primary ? "var(--warn-bg)" : "transparent",
-        borderRadius: primary ? 3 : 0,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 9.5,
-          letterSpacing: ".06em",
-          textTransform: "uppercase",
-          color: primary ? "var(--ink)" : "var(--ink-3)",
-          fontWeight: primary ? 800 : 700,
-        }}
-      >
-        {label}
-        {primary && <span style={{ color: "var(--warn)" }}> · primary signal</span>}
-      </div>
-      <Bar val={x} color="var(--ink-2)" label="them" />
-      <Bar val={you} color="var(--you)" label="you" />
-    </div>
-  );
-}
-
-function InfluenceBlock({
-  w,
-  you,
-}: {
-  w: WhyNamed;
-  you: YouInfluence | null;
-}) {
-  const yf = you?.factors ?? { cited: 0, third_party: 0, own_site: 0 };
-  return (
-    <div
-      style={{
-        marginBottom: 18,
-        paddingBottom: 16,
+        marginBottom: 14,
+        paddingBottom: 12,
         borderBottom: "1px solid var(--grid)",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <b style={{ fontSize: 14, color: "var(--ink)" }}>{w.brand}</b>
         <span className="tm-badge" style={{ background: "var(--neg-bg)", color: "var(--neg)" }}>
-          Named as recommended
+          recommended by {llmName}
         </span>
-        <span className="mono" style={{ fontSize: 10, color: "var(--warn)", fontWeight: 700 }}>
-          decisive: {DECISIVE_LABEL[w.decisive]}
+        <span className="mono" style={{ fontSize: 10, color: "var(--ink-3)" }}>
+          strongest signal: {DECISIVE_LABEL[w.decisive].toLowerCase()}
         </span>
       </div>
 
-      <FactorRow label="Cited sources" x={w.factors.cited} you={yf.cited} primary />
-      <FactorRow label="Third-party presence" x={w.factors.third_party} you={yf.third_party} />
-      <FactorRow label="Own-site signals" x={w.factors.own_site} you={yf.own_site} />
+      <p className="nar" style={{ fontSize: 13.5, lineHeight: 1.55, color: "var(--ink-2)", marginTop: 8 }}>
+        {w.verdict}
+      </p>
 
-      <div style={{ marginTop: 10 }}>
-        <div className="lbl" style={{ marginBottom: 4 }}>
-          Cited sources naming {w.brand} · {w.named_in_sources.length} of {w.cited_total}
-        </div>
+      <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--ink-3)", lineHeight: 1.6 }}>
         {w.named_in_sources.length === 0 ? (
-          <span style={{ fontSize: 11.5, color: "var(--ink-3)" }}>
-            none of this query's cited sources name it
-          </span>
+          <>Not named in any source cited by this answer.</>
         ) : (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <>
+            Named in {w.named_in_sources.length} cited source
+            {w.named_in_sources.length === 1 ? "" : "s"}:{" "}
             {w.named_in_sources.map((s, i) => (
               <a
                 key={i}
@@ -157,20 +85,15 @@ function InfluenceBlock({
                 target="_blank"
                 rel="noopener noreferrer"
                 className="tm-chip"
-                style={{ textDecoration: "none" }}
+                style={{ textDecoration: "none", marginRight: 4 }}
                 title={s.url}
               >
                 {s.domain}
-                <small style={{ marginLeft: 5, opacity: 0.7 }}>{SRC_LABEL[s.source_type]}</small>
               </a>
             ))}
-          </div>
+          </>
         )}
       </div>
-
-      <p className="nar" style={{ fontSize: 14, lineHeight: 1.5, color: "var(--ink-2)", marginTop: 10 }}>
-        {w.verdict}
-      </p>
     </div>
   );
 }
@@ -841,11 +764,11 @@ function PollBody({
           <div style={{ marginTop: 20 }}>
             <div className="lbl">
               {namedInAnswer
-                ? `Why ${llmName} cites these competitors in its sources`
-                : `Why ${llmName} named these — and not you`}
+                ? `Why ${llmName} recommends these competitors`
+                : `Why ${llmName} recommends these — and not you`}
             </div>
             {poll.why_cited.map((w, i) => (
-              <InfluenceBlock key={i} w={w} you={poll.own_page} />
+              <InfluenceBlock key={i} w={w} llmName={llmName} />
             ))}
           </div>
         ) : analyzing ? (
