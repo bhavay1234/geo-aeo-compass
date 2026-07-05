@@ -204,11 +204,11 @@ function liveText(audit: Audit | null): string | null {
 
 /** Enterprise report header: breadcrumb · title · target meta · engines · actions. */
 export function ReportHeader({ onMenu }: { onMenu?: () => void }) {
-  const { audit } = useWorkspace();
+  const { audit, polls } = useWorkspace();
   const loc = useLocation();
-  const title = PAGE_TITLE[loc.pathname] ?? "Overview";
   const crumb = CRUMB[loc.pathname] ?? "Overview";
   const llms = audit ? llmsPolled(audit) : [];
+  const promptCount = groupPollsByQuery(polls).size;
   const live = liveText(audit);
   const running = audit && audit.status !== "completed" && audit.status !== "failed";
 
@@ -234,21 +234,41 @@ export function ReportHeader({ onMenu }: { onMenu?: () => void }) {
         </button>
       </div>
 
-      <div className="trow" style={{ marginTop: 10 }}>
+      <div className="trow" style={{ marginTop: 8 }}>
         <div style={{ minWidth: 0 }}>
-          <h1>{title}</h1>
+          <h1>
+            {audit ? (
+              <>
+                <Favicon domain={audit.domain} size={20} />
+                {audit.brand_name}
+              </>
+            ) : (
+              "Overview"
+            )}
+          </h1>
           {audit && (
             <div className="meta">
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 550, color: "var(--ink)" }}>
-                <Favicon domain={audit.domain} size={15} />
-                {audit.brand_name}
-              </span>
               <span className="dmn">{audit.domain}</span>
               {live && (
-                <span className="tm-live">
-                  {running && <span className="tm-blip" />}
-                  {live}
-                </span>
+                <>
+                  <span className="sep" aria-hidden />
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    {running && <span className="tm-blip" />}
+                    {live}
+                  </span>
+                </>
+              )}
+              {promptCount > 0 && (
+                <>
+                  <span className="sep" aria-hidden />
+                  <span>{promptCount} prompt{promptCount === 1 ? "" : "s"}</span>
+                </>
+              )}
+              {llms.length > 0 && (
+                <>
+                  <span className="sep" aria-hidden />
+                  <span>{llms.length} AI engine{llms.length === 1 ? "" : "s"}</span>
+                </>
               )}
             </div>
           )}
