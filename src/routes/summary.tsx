@@ -147,14 +147,14 @@ export function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[
   })();
   const { domains: domainRows, byType } = buildDomainStats(audit, citeEntries);
   const TYPE_COLORS = [
-    "var(--you)",
-    "var(--hot)",
-    "var(--warn)",
-    "var(--pos)",
-    "var(--ink-3)",
-    "#8b5cf6",
-    "#0891b2",
-    "#db2777",
+    "var(--c1)",
+    "var(--c2)",
+    "var(--c3)",
+    "var(--c4)",
+    "var(--c5)",
+    "var(--c6)",
+    "var(--c7)",
+    "var(--neutral)",
   ];
 
   // total = distinct queries (one per gap row after per-query aggregation).

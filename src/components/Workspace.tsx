@@ -6,7 +6,7 @@ import {
   WorkspaceContext,
   type WorkspaceValue,
 } from "./terminal/workspace-context";
-import { Sidebar, ReportHeader } from "./terminal/Shell";
+import { Sidebar, ReportHeader, GlobalHeader } from "./terminal/Shell";
 
 export { useWorkspace } from "./terminal/workspace-context";
 
@@ -80,15 +80,18 @@ export function Workspace({ children }: { children: ReactNode }) {
   return (
     <WorkspaceContext.Provider value={value}>
       <div className="tm">
-        <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
-        <div
-          className={`tm-scrim ${navOpen ? "open" : ""}`}
-          onClick={() => setNavOpen(false)}
-          aria-hidden
-        />
-        <div className="tm-main">
-          <ReportHeader onMenu={() => setNavOpen(true)} />
-          {children}
+        <GlobalHeader onMenu={() => setNavOpen(true)} />
+        <div className="tm-body">
+          <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
+          <div
+            className={`tm-scrim ${navOpen ? "open" : ""}`}
+            onClick={() => setNavOpen(false)}
+            aria-hidden
+          />
+          <div className="tm-main">
+            <ReportHeader />
+            {children}
+          </div>
         </div>
       </div>
     </WorkspaceContext.Provider>

@@ -71,22 +71,75 @@ const LLM_NAME: Record<LlmSource, string> = {
   gemini: "Gemini",
 };
 
-function statusDot(audit: Audit | null): { color: string; label: string } {
-  if (!audit) return { color: "var(--ink-3)", label: "No audit" };
-  if (audit.status === "completed") return { color: "var(--pos)", label: "Completed" };
-  if (audit.status === "failed") return { color: "var(--neg)", label: "Failed" };
-  return { color: "var(--warn)", label: "Running" };
+/** Global top bar: plain wordmark, target selector, minimal right controls. */
+export function GlobalHeader({ onMenu }: { onMenu?: () => void }) {
+  const { audits, select, audit } = useWorkspace();
+  const { theme, toggle } = useTheme();
+  const score = audit?.visibility_score ?? null;
+
+  return (
+    <header className="tm-ghead">
+      {onMenu && (
+        <button className="tm-burger" onClick={onMenu} aria-label="Open navigation">
+          <Icon name="menu" size={17} />
+        </button>
+      )}
+      <span className="tm-wm">Compass</span>
+      <span className="tm-ghead-sep" aria-hidden />
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="tm-tgt2" aria-label="Select audit target">
+            {audit && <Favicon domain={audit.domain} size={14} />}
+            <span className="nm">{audit ? audit.brand_name : "Select audit"}</span>
+            {score != null && <span className="sc num">{score}</span>}
+            <svg className="cv" width="9" height="9" viewBox="0 0 12 12" aria-hidden>
+              <path d="M3 4.5L6 7.5L9 4.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-[280px]">
+          <DropdownMenuLabel>Audits</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {audits.length === 0 ? (
+            <DropdownMenuItem disabled>No audits yet</DropdownMenuItem>
+          ) : (
+            audits.map((a) => (
+              <DropdownMenuItem
+                key={a.id}
+                onClick={() => select(a.id)}
+                className="flex-col items-start gap-0.5"
+              >
+                <span className="font-medium">{a.brand_name}</span>
+                <span className="text-xs opacity-60">
+                  {a.domain} · {a.status}
+                </span>
+              </DropdownMenuItem>
+            ))
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <Link to="/">New audit</Link>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <div className="tm-spacer" />
+      <button
+        className="tm-ghead-ico"
+        onClick={toggle}
+        aria-label="Toggle color theme"
+        title={theme === "dark" ? "Switch to light" : "Switch to dark"}
+      >
+        <Icon name={theme === "dark" ? "moon" : "sun"} size={15} />
+      </button>
+    </header>
+  );
 }
 
-/** Grouped left-rail navigation: brand · target · sections · footer. */
+/** Plain left navigation: group labels + text rows, no chrome. */
 export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
-  const { audits, select, audit, polls } = useWorkspace();
-  const { theme, toggle } = useTheme();
+  const { audit, polls } = useWorkspace();
   const loc = useLocation();
   const path = loc.pathname;
-
-  const score = audit?.visibility_score ?? null;
-  const dot = statusDot(audit);
 
   const queryCount = groupPollsByQuery(polls).size;
   const actionQueries = new Set(
@@ -103,57 +156,9 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
 
   return (
     <aside className={`tm-side ${open ? "open" : ""}`}>
-      <div className="tm-side-brand">
-        <span className="mk">
-          <Icon name="spark" size={15} strokeWidth={2} />
-        </span>
-        Compass
-      </div>
-
-      <div className="tm-side-target">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button className="tgt" aria-label="Select audit target">
-              <span className="l">Target</span>
-              <span className="v">
-                {audit && <Favicon domain={audit.domain} size={15} />}
-                <span className="nm">{audit ? audit.brand_name : "Select an audit"}</span>
-                {score != null && <span className="sc num">{score}</span>}
-              </span>
-              {audit && (
-                <span className="dm">
-                  <span className="tm-dot" style={{ background: dot.color }} title={dot.label} />
-                  {audit.domain}
-                </span>
-              )}
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-[300px]">
-            <DropdownMenuLabel>Audits</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            {audits.length === 0 ? (
-              <DropdownMenuItem disabled>No audits yet</DropdownMenuItem>
-            ) : (
-              audits.map((a) => (
-                <DropdownMenuItem
-                  key={a.id}
-                  onClick={() => select(a.id)}
-                  className="flex-col items-start gap-0.5"
-                >
-                  <span className="font-medium">{a.brand_name}</span>
-                  <span className="text-xs opacity-60">
-                    {a.domain} · {a.status}
-                  </span>
-                </DropdownMenuItem>
-              ))
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
       <nav className="tm-side-nav" aria-label="Sections">
         {NAV_GROUPS.map((g) => (
-          <div key={g.section}>
+          <div key={g.section} className="tm-navgroup">
             <div className="sec">{g.section}</div>
             {g.items.map((t) => {
               const on = path === t.to;
@@ -167,28 +172,14 @@ export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: (
                   aria-current={on ? "page" : undefined}
                   onClick={onClose}
                 >
-                  <span className="gl">
-                    <Icon name={t.icon} size={17} />
-                  </span>
                   {t.label}
-                  {ct ? <span className="ct">{ct}</span> : null}
+                  {ct ? <span className="ct num">{ct}</span> : null}
                 </Link>
               );
             })}
           </div>
         ))}
       </nav>
-
-      <div className="tm-side-foot">
-        <Link to="/" className="tm-newaudit" aria-label="Start a new audit">
-          <Icon name="plus" size={15} strokeWidth={2.2} /> New audit
-        </Link>
-        <button className="tm-toggle" onClick={toggle} aria-label="Toggle color theme">
-          <Icon name={theme === "dark" ? "moon" : "sun"} size={15} />
-          <span className="tgl-lbl">{theme === "dark" ? "Dark" : "Light"} theme</span>
-          <span className="tm-sw" />
-        </button>
-      </div>
     </aside>
   );
 }
@@ -203,10 +194,11 @@ function liveText(audit: Audit | null): string | null {
 }
 
 /** Enterprise report header: breadcrumb · title · target meta · engines · actions. */
-export function ReportHeader({ onMenu }: { onMenu?: () => void }) {
+export function ReportHeader() {
   const { audit, polls } = useWorkspace();
   const loc = useLocation();
   const crumb = CRUMB[loc.pathname] ?? "Overview";
+  const title = PAGE_TITLE[loc.pathname] ?? "Overview";
   const llms = audit ? llmsPolled(audit) : [];
   const promptCount = groupPollsByQuery(polls).size;
   const live = liveText(audit);
@@ -214,38 +206,12 @@ export function ReportHeader({ onMenu }: { onMenu?: () => void }) {
 
   return (
     <header className="tm-rphead">
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-        {onMenu && (
-          <button className="tm-burger" onClick={onMenu} aria-label="Open navigation">
-            <Icon name="menu" size={17} />
-          </button>
-        )}
-        <nav className="tm-crumbs" aria-label="Breadcrumb" style={{ marginBottom: 0 }}>
-          Compass <span aria-hidden>/</span> AI visibility <span aria-hidden>/</span> <b>{crumb}</b>
-        </nav>
-        <div className="tm-spacer" />
-        <button
-          type="button"
-          className="tm-btn tm-btn-ghost tm-btn-sm"
-          onClick={() => window.print()}
-          title="Export this report as a PDF via print"
-        >
-          <Icon name="download" size={14} /> Export
-        </button>
-      </div>
-
-      <div className="trow" style={{ marginTop: 8 }}>
+      <div className="trow">
         <div style={{ minWidth: 0 }}>
-          <h1>
-            {audit ? (
-              <>
-                <Favicon domain={audit.domain} size={20} />
-                {audit.brand_name}
-              </>
-            ) : (
-              "Overview"
-            )}
-          </h1>
+          <nav className="tm-crumbs" aria-label="Breadcrumb">
+            AI visibility <span aria-hidden>/</span> <b>{crumb}</b>
+          </nav>
+          <h1>{title}</h1>
           {audit && (
             <div className="meta">
               <span className="dmn">{audit.domain}</span>
@@ -273,15 +239,25 @@ export function ReportHeader({ onMenu }: { onMenu?: () => void }) {
             </div>
           )}
         </div>
-        <div className="acts" style={{ alignSelf: "flex-end" }}>
-          <div className="tm-chiprow" aria-label="Tracked AI engines">
-            {llms.map((l) => (
-              <span className="tm-echip" key={l}>
-                <LlmIcon llm={l} size={13} />
-                {LLM_NAME[l]}
-              </span>
-            ))}
-          </div>
+        <div className="acts">
+          {llms.length > 0 && (
+            <div className="tm-chiprow" aria-label="Tracked AI engines">
+              {llms.map((l) => (
+                <span className="tm-echip" key={l}>
+                  <LlmIcon llm={l} size={13} />
+                  {LLM_NAME[l]}
+                </span>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            className="tm-btn tm-btn-ghost tm-btn-sm"
+            onClick={() => window.print()}
+            title="Export this report as a PDF via print"
+          >
+            <Icon name="download" size={14} /> Export
+          </button>
         </div>
       </div>
     </header>
