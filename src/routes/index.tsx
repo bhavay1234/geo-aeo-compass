@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";
 import { startAudit, getRecentAudits, analyzeDna, type DnaResponse } from "@/lib/client/api";
 import { useTheme } from "@/components/terminal/useTheme";
+import { Icon } from "@/components/terminal/primitives";
 import type { AuditStatus } from "@/lib/db/types";
 
 export const Route = createFileRoute("/")({
@@ -102,15 +103,18 @@ function Index() {
     <div className="tm tm-solo">
       <header className="tm-solohead">
         <div className="tm-side-brand" style={{ padding: 0 }}>
-          <span className="mk">✦</span> Compass
+          <span className="mk">
+            <Icon name="spark" size={15} strokeWidth={2} />
+          </span>
+          Compass
         </div>
         <div className="tm-spacer" />
         <div className="tm-live">
           <span className="tm-blip" />
-          new audit · 3 LLMs
+          New audit · 3 engines
         </div>
         <button className="tm-toggle" onClick={toggle} aria-label="Toggle theme" style={{ flex: "0 0 auto" }}>
-          <span aria-hidden>{theme === "dark" ? "☾" : "☀"}</span>
+          <Icon name={theme === "dark" ? "moon" : "sun"} size={15} />
           <span className="tm-sw" />
         </button>
       </header>
@@ -119,7 +123,7 @@ function Index() {
         {/* Run form */}
         <div className="tm-panel tm-reveal">
           <div className="tm-phead">
-            <h2>⚡ Run AEO audit</h2>
+            <h2>Run AEO audit</h2>
             <span className="meta">ChatGPT · Perplexity · Gemini</span>
           </div>
           <div style={{ padding: "20px 18px" }}>
@@ -151,7 +155,7 @@ function Index() {
                 background: "var(--panel)",
               }}
             >
-              <div className="tm-label">① Start from your website</div>
+              <div className="tm-label">1 · Start from your website</div>
               <div style={{ display: "flex", gap: 10 }}>
                 <input
                   className="tm-input"
@@ -170,7 +174,7 @@ function Index() {
                   }}
                   disabled={dnaMutation.isPending || submitting}
                 >
-                  {dnaMutation.isPending ? "Analyzing…" : "Analyze website ▸"}
+                  {dnaMutation.isPending ? "Analyzing…" : "Analyze website"}
                 </button>
               </div>
 
@@ -200,7 +204,7 @@ function Index() {
 
               {dnaMutation.isPending && (
                 <p className="mono" style={{ marginTop: 10, fontSize: 11, color: "var(--ink-3)" }}>
-                  ◴ Reading {domain} - scraping the site, building Brand DNA, and
+                  Reading {domain} - scraping the site, building Brand DNA, and
                   picking the top queries by search volume… (~1 min)
                 </p>
               )}
@@ -321,14 +325,14 @@ function Index() {
 
             {error && (
               <div className="tm-warn-banner" style={{ marginTop: 16, borderColor: "var(--neg)", background: "var(--neg-bg)", color: "var(--neg)" }}>
-                <span aria-hidden>⚠</span>
+                <span aria-hidden></span>
                 {error}
               </div>
             )}
 
             <div style={{ marginTop: 18 }}>
               <button className="tm-btn" onClick={handleRun} disabled={submitting}>
-                {submitting ? "Starting…" : "Run audit ▸"}
+                {submitting ? "Starting…" : "Run audit"}
               </button>
             </div>
           </div>
@@ -337,7 +341,7 @@ function Index() {
         {/* Recent audits */}
         <div className="tm-panel tm-reveal" style={{ borderRight: "none", animationDelay: ".05s" }}>
           <div className="tm-phead">
-            <h2>▤ Recent audits</h2>
+            <h2>Recent audits</h2>
             <span className="meta">last 10</span>
           </div>
           {recentQuery.isLoading ? (

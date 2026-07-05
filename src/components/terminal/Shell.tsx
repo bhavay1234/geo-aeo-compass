@@ -11,49 +11,82 @@ import {
 import { useWorkspace } from "./workspace-context";
 import { useTheme } from "./useTheme";
 import { allCompetitorBrands, groupPollsByQuery, llmsPolled } from "./derive";
-import { Icon, type IconName } from "./primitives";
-import type { Audit } from "@/lib/db/types";
+import { Icon, LlmIcon, Favicon, type IconName } from "./primitives";
+import type { Audit, LlmSource } from "@/lib/db/types";
 
-const TABS: { key: string; label: string; icon: IconName; to: "/summary" | "/queries" | "/citations" | "/competitors" | "/actions" | "/analytics" }[] = [
-  { key: "summary", label: "Overview", icon: "overview", to: "/summary" },
-  { key: "queries", label: "Queries", icon: "queries", to: "/queries" },
-  { key: "citations", label: "Citations", icon: "citations", to: "/citations" },
-  { key: "competitors", label: "Competitors", icon: "competitors", to: "/competitors" },
-  { key: "actions", label: "Actionables", icon: "actions", to: "/actions" },
-  { key: "analytics", label: "Analytics", icon: "analytics", to: "/analytics" },
+type TabPath = "/summary" | "/queries" | "/citations" | "/competitors" | "/actions" | "/analytics";
+interface NavItem {
+  key: string;
+  label: string;
+  icon: IconName;
+  to: TabPath;
+}
+/** Existing routes mapped into intelligence-platform groups. */
+const NAV_GROUPS: { section: string; items: NavItem[] }[] = [
+  {
+    section: "Overview",
+    items: [{ key: "summary", label: "Overview", icon: "overview", to: "/summary" }],
+  },
+  {
+    section: "Discover",
+    items: [
+      { key: "queries", label: "Queries", icon: "queries", to: "/queries" },
+      { key: "citations", label: "Citations", icon: "citations", to: "/citations" },
+    ],
+  },
+  {
+    section: "Competitive intelligence",
+    items: [{ key: "competitors", label: "Competitors", icon: "competitors", to: "/competitors" }],
+  },
+  {
+    section: "Optimize",
+    items: [{ key: "actions", label: "Action center", icon: "actions", to: "/actions" }],
+  },
+  {
+    section: "Reporting",
+    items: [{ key: "analytics", label: "Analytics", icon: "analytics", to: "/analytics" }],
+  },
 ];
 
 const PAGE_TITLE: Record<string, string> = {
+  "/summary": "AI Visibility Overview",
+  "/queries": "Queries",
+  "/citations": "Citations",
+  "/competitors": "Competitors",
+  "/actions": "Action center",
+  "/analytics": "Analytics",
+};
+const CRUMB: Record<string, string> = {
   "/summary": "Overview",
   "/queries": "Queries",
   "/citations": "Citations",
   "/competitors": "Competitors",
-  "/actions": "Actionables",
+  "/actions": "Action center",
   "/analytics": "Analytics",
 };
 
-function liveText(audit: Audit | null): string {
-  const engines =
-    audit && llmsPolled(audit).length > 1
-      ? `${llmsPolled(audit).length} LLMs · web search`
-      : "ChatGPT · web search";
-  if (!audit) return engines;
-  if (audit.status === "running" || audit.status === "pending")
-    return `${engines} · running`;
-  if (audit.status === "finalizing") return `${engines} · scoring`;
-  if (audit.completed_at)
-    return `updated ${formatDistanceToNow(new Date(audit.completed_at), { addSuffix: true })}`;
-  return engines;
+const LLM_NAME: Record<LlmSource, string> = {
+  chatgpt: "ChatGPT",
+  perplexity: "Perplexity",
+  gemini: "Gemini",
+};
+
+function statusDot(audit: Audit | null): { color: string; label: string } {
+  if (!audit) return { color: "var(--ink-3)", label: "No audit" };
+  if (audit.status === "completed") return { color: "var(--pos)", label: "Completed" };
+  if (audit.status === "failed") return { color: "var(--neg)", label: "Failed" };
+  return { color: "var(--warn)", label: "Running" };
 }
 
-/** Vertical left-rail navigation: brand · target selector · sections · footer. */
-export function Sidebar() {
+/** Grouped left-rail navigation: brand · target · sections · footer. */
+export function Sidebar({ open = false, onClose }: { open?: boolean; onClose?: () => void }) {
   const { audits, select, audit, polls } = useWorkspace();
   const { theme, toggle } = useTheme();
   const loc = useLocation();
   const path = loc.pathname;
 
   const score = audit?.visibility_score ?? null;
+  const dot = statusDot(audit);
 
   const queryCount = groupPollsByQuery(polls).size;
   const actionQueries = new Set(
@@ -69,20 +102,30 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="tm-side">
+    <aside className={`tm-side ${open ? "open" : ""}`}>
       <div className="tm-side-brand">
-        <span className="mk">✦</span> Compass
+        <span className="mk">
+          <Icon name="spark" size={15} strokeWidth={2} />
+        </span>
+        Compass
       </div>
 
       <div className="tm-side-target">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="tgt" aria-label="Select audit">
+            <button className="tgt" aria-label="Select audit target">
               <span className="l">Target</span>
               <span className="v">
-                {audit ? audit.brand_name : "-"}
-                {score != null && <span className="sc">{score}</span>}
+                {audit && <Favicon domain={audit.domain} size={15} />}
+                <span className="nm">{audit ? audit.brand_name : "Select an audit"}</span>
+                {score != null && <span className="sc num">{score}</span>}
               </span>
+              {audit && (
+                <span className="dm">
+                  <span className="tm-dot" style={{ background: dot.color }} title={dot.label} />
+                  {audit.domain}
+                </span>
+              )}
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-[300px]">
@@ -109,33 +152,38 @@ export function Sidebar() {
       </div>
 
       <nav className="tm-side-nav" aria-label="Sections">
-        <div className="sec">Report</div>
-        {TABS.map((t) => {
-          const on = path === t.to;
-          const ct = counts[t.key];
-          return (
-            <Link
-              key={t.key}
-              to={t.to}
-              search={(prev) => ({ ...prev })}
-              className={`tm-navitem ${on ? "on" : ""}`}
-              aria-current={on ? "page" : undefined}
-            >
-              <span className="gl">
-                <Icon name={t.icon} size={18} />
-              </span>
-              {t.label}
-              {ct ? <span className="ct">{ct}</span> : null}
-            </Link>
-          );
-        })}
+        {NAV_GROUPS.map((g) => (
+          <div key={g.section}>
+            <div className="sec">{g.section}</div>
+            {g.items.map((t) => {
+              const on = path === t.to;
+              const ct = counts[t.key];
+              return (
+                <Link
+                  key={t.key}
+                  to={t.to}
+                  search={(prev) => ({ ...prev })}
+                  className={`tm-navitem ${on ? "on" : ""}`}
+                  aria-current={on ? "page" : undefined}
+                  onClick={onClose}
+                >
+                  <span className="gl">
+                    <Icon name={t.icon} size={17} />
+                  </span>
+                  {t.label}
+                  {ct ? <span className="ct">{ct}</span> : null}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       <div className="tm-side-foot">
         <Link to="/" className="tm-newaudit" aria-label="Start a new audit">
-          <Icon name="plus" size={16} strokeWidth={2.4} /> New audit
+          <Icon name="plus" size={15} strokeWidth={2.2} /> New audit
         </Link>
-        <button className="tm-toggle" onClick={toggle} aria-label="Toggle theme">
+        <button className="tm-toggle" onClick={toggle} aria-label="Toggle color theme">
           <Icon name={theme === "dark" ? "moon" : "sun"} size={15} />
           <span className="tgl-lbl">{theme === "dark" ? "Dark" : "Light"} theme</span>
           <span className="tm-sw" />
@@ -145,72 +193,76 @@ export function Sidebar() {
   );
 }
 
-/** Slim sticky header inside the main column: page title · metrics · live. */
-export function TopBar() {
-  const { audits, audit, polls } = useWorkspace();
+function liveText(audit: Audit | null): string | null {
+  if (!audit) return null;
+  if (audit.status === "running" || audit.status === "pending") return "Audit running";
+  if (audit.status === "finalizing") return "Scoring";
+  if (audit.completed_at)
+    return `Updated ${formatDistanceToNow(new Date(audit.completed_at), { addSuffix: true })}`;
+  return null;
+}
+
+/** Enterprise report header: breadcrumb · title · target meta · engines · actions. */
+export function ReportHeader({ onMenu }: { onMenu?: () => void }) {
+  const { audit } = useWorkspace();
   const loc = useLocation();
   const title = PAGE_TITLE[loc.pathname] ?? "Overview";
-
-  const score = audit?.visibility_score ?? null;
-  const total = polls.length;
-  const cited = polls.filter((p) => p.brand_cited).length;
-  const blind = polls.filter((p) => !p.brand_cited).length;
-
-  let delta: number | null = null;
-  if (audit && score != null) {
-    const prior = audits
-      .filter(
-        (a) =>
-          a.status === "completed" &&
-          a.id !== audit.id &&
-          a.brand_name === audit.brand_name &&
-          a.domain === audit.domain &&
-          a.visibility_score != null
-      )
-      .sort(
-        (a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      )[0];
-    if (prior?.visibility_score != null) delta = score - prior.visibility_score;
-  }
+  const crumb = CRUMB[loc.pathname] ?? "Overview";
+  const llms = audit ? llmsPolled(audit) : [];
+  const live = liveText(audit);
+  const running = audit && audit.status !== "completed" && audit.status !== "failed";
 
   return (
-    <header className="tm-topbar">
-      <span className="pg">{title}</span>
-      <div className="tm-spacer" />
+    <header className="tm-rphead">
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {onMenu && (
+          <button className="tm-burger" onClick={onMenu} aria-label="Open navigation">
+            <Icon name="menu" size={17} />
+          </button>
+        )}
+        <nav className="tm-crumbs" aria-label="Breadcrumb" style={{ marginBottom: 0 }}>
+          Compass <span aria-hidden>/</span> AI visibility <span aria-hidden>/</span> <b>{crumb}</b>
+        </nav>
+        <div className="tm-spacer" />
+        <button
+          type="button"
+          className="tm-btn tm-btn-ghost tm-btn-sm"
+          onClick={() => window.print()}
+          title="Export this report as a PDF via print"
+        >
+          <Icon name="download" size={14} /> Export
+        </button>
+      </div>
 
-      {score != null && (
-        <div className="tm-metric" title="Overall visibility score">
-          <span className="l">Visibility</span>
-          <span className="v">{score}</span>
+      <div className="trow" style={{ marginTop: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <h1>{title}</h1>
+          {audit && (
+            <div className="meta">
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 550, color: "var(--ink)" }}>
+                <Favicon domain={audit.domain} size={15} />
+                {audit.brand_name}
+              </span>
+              <span className="dmn">{audit.domain}</span>
+              {live && (
+                <span className="tm-live">
+                  {running && <span className="tm-blip" />}
+                  {live}
+                </span>
+              )}
+            </div>
+          )}
         </div>
-      )}
-      {delta != null && (
-        <div className="tm-metric" title="Change vs your prior audit">
-          <span className="l">Δ prior</span>
-          <span className={`v ${delta >= 0 ? "pos" : "neg"}`}>
-            {delta >= 0 ? `+${delta}` : `${delta}`}
-          </span>
+        <div className="acts" style={{ alignSelf: "flex-end" }}>
+          <div className="tm-chiprow" aria-label="Tracked AI engines">
+            {llms.map((l) => (
+              <span className="tm-echip" key={l}>
+                <LlmIcon llm={l} size={13} />
+                {LLM_NAME[l]}
+              </span>
+            ))}
+          </div>
         </div>
-      )}
-      {total > 0 && (
-        <div className="tm-metric" title="AI answers citing your brand (one per query per LLM)">
-          <span className="l">Cited</span>
-          <span className="v">
-            {cited}/{total}
-          </span>
-        </div>
-      )}
-      {total > 0 && (
-        <div className="tm-metric" title="AI answers where your brand does not appear">
-          <span className="l">Blind</span>
-          <span className={`v ${blind > 0 ? "hot" : ""}`}>{blind}</span>
-        </div>
-      )}
-
-      <div className="tm-live">
-        <span className="tm-blip" />
-        {liveText(audit)}
       </div>
     </header>
   );

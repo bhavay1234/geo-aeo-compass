@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { getRecentAudits, getAuditResult } from "@/lib/client/api";
@@ -6,7 +6,7 @@ import {
   WorkspaceContext,
   type WorkspaceValue,
 } from "./terminal/workspace-context";
-import { Sidebar, TopBar } from "./terminal/Shell";
+import { Sidebar, ReportHeader } from "./terminal/Shell";
 
 export { useWorkspace } from "./terminal/workspace-context";
 
@@ -22,6 +22,7 @@ const PENDING = new Set(["pending", "running", "finalizing"]);
 export function Workspace({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as { audit?: string };
+  const [navOpen, setNavOpen] = useState(false);
 
   const recentQ = useQuery({
     queryKey: ["recent-audits"],
@@ -79,9 +80,14 @@ export function Workspace({ children }: { children: ReactNode }) {
   return (
     <WorkspaceContext.Provider value={value}>
       <div className="tm">
-        <Sidebar />
+        <Sidebar open={navOpen} onClose={() => setNavOpen(false)} />
+        <div
+          className={`tm-scrim ${navOpen ? "open" : ""}`}
+          onClick={() => setNavOpen(false)}
+          aria-hidden
+        />
         <div className="tm-main">
-          <TopBar />
+          <ReportHeader onMenu={() => setNavOpen(true)} />
           {children}
         </div>
       </div>

@@ -6,8 +6,23 @@ import type { Audit, PollResult } from "@/lib/db/types";
 const PENDING = new Set(["pending", "running", "finalizing"]);
 const PARTIAL_AFTER_SEC = 90;
 
-function CenterMsg({ children }: { children: ReactNode }) {
-  return <div className="tm-empty mono">{children}</div>;
+/** Skeleton dashboard while the audit result loads - calm, no spinner. */
+function SkeletonPage() {
+  return (
+    <div className="tm-page" aria-busy="true" aria-label="Loading report">
+      <div className="tm-skel" style={{ height: 96 }} />
+      <div className="tm-row" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(205px, 1fr))" }}>
+        {Array.from({ length: 5 }, (_, i) => (
+          <div key={i} className="tm-skel" style={{ height: 108 }} />
+        ))}
+      </div>
+      <div className="tm-skel" style={{ height: 300 }} />
+      <div className="tm-row c2">
+        <div className="tm-skel" style={{ height: 220 }} />
+        <div className="tm-skel" style={{ height: 220 }} />
+      </div>
+    </div>
+  );
 }
 
 function EmptyRun() {
@@ -34,7 +49,7 @@ function ProgressPanel({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   return (
     <div className="tm-panel" style={{ borderRight: "none" }}>
       <div className="tm-phead">
-        <h2>{scoring ? "◰ Scoring" : "◰ Analyzing ChatGPT answers"}</h2>
+        <h2>{scoring ? "Scoring" : "Analyzing ChatGPT answers"}</h2>
         <span className="meta">{audit.brand_name}</span>
       </div>
       <div style={{ padding: 24 }}>
@@ -71,7 +86,6 @@ export function PartialBanner() {
   return (
     <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--grid)" }}>
       <div className="tm-warn-banner">
-        <span aria-hidden>⚑</span>
         Scoring is taking longer than expected - showing partial results from
         the queries completed so far.
       </div>
@@ -95,10 +109,10 @@ export function AuditGate({
 }) {
   const { audit, polls, loading, hasAnyCompleted, selectedId } = useWorkspace();
 
-  if (loading && !audit) return <CenterMsg>Loading…</CenterMsg>;
+  if (loading && !audit) return <SkeletonPage />;
   if (!audit) {
     if (!selectedId && !hasAnyCompleted) return <EmptyRun />;
-    return <CenterMsg>Loading…</CenterMsg>;
+    return <SkeletonPage />;
   }
 
   const pending = PENDING.has(audit.status);

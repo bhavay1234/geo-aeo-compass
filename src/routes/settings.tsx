@@ -71,7 +71,7 @@ function SettingsInner() {
     <div className="tm-rows" style={{ maxWidth: 640 }}>
       <div className="tm-panel tm-reveal" style={{ borderRight: "none" }}>
         <div className="tm-phead">
-          <h2>◧ Brand</h2>
+          <h2>Brand</h2>
           <span className="meta">audited target</span>
         </div>
         <Row label="Brand name" value={audit.brand_name} />
@@ -85,7 +85,7 @@ function SettingsInner() {
 
       <div className="tm-panel tm-reveal" style={{ borderRight: "none", animationDelay: ".05s" }}>
         <div className="tm-phead">
-          <h2>◫ Tracking scope</h2>
+          <h2>Tracking scope</h2>
           <span className="meta">this run</span>
         </div>
         <Row

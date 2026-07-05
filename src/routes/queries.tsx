@@ -317,12 +317,12 @@ function OpenInChatGPT({ query }: { query: string }) {
       title="Opens ChatGPT with this prompt - runs live in YOUR personalized account, so it may differ from this cold-session audit. Not proof."
       style={{ fontSize: 11, color: "var(--ink-3)", whiteSpace: "nowrap" }}
     >
-      ↗ Try in ChatGPT (live)
+      Try in ChatGPT (live)
     </a>
   );
 }
 
-function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
+export function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -368,7 +368,7 @@ function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const segClass = (k: Filter) => `tm-seg ${filter === k ? "on" : ""}`;
 
   return (
-    <div>
+    <div className="tm-page">
       <MethodologyNote queryCount={counts.all} />
       <div className="tm-toolbar">
         <button className={segClass("all")} onClick={() => setFilter("all")}>
@@ -744,7 +744,7 @@ function PollBody({
             : poll.raw_response || "No answer text stored."}
           {!poll.brand_cited && (
             <span className="tm-none">
-              ⚑ {audit.brand_name} not mentioned in this answer
+              {audit.brand_name} not mentioned in this answer
             </span>
           )}
         </div>
@@ -787,7 +787,7 @@ function PollBody({
           <div style={{ marginTop: 20 }}>
             <div className="lbl">Why {llmName} named these</div>
             <p className="mono" style={{ fontSize: 12, color: "var(--ink-3)" }}>
-              ◴ analyzing influence signals…
+              analyzing influence signals…
             </p>
           </div>
         ) : analysisFailed ? (

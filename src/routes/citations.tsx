@@ -192,7 +192,7 @@ function Row({
   );
 }
 
-function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
+export function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const entries = audit.citation_analysis ?? [];
   const polledLlms = llmsPolled(audit);
   const [openKey, setOpenKey] = useState<CitationCategory | null>(null);
@@ -290,7 +290,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     return (
       <div className="tm-empty">
         {analyzing ? (
-          <p className="mono">◴ Analyzing cited sources…</p>
+          <p className="mono">Analyzing cited sources…</p>
         ) : failed ? (
           <p>Citation analysis was unavailable for this run - try re-running.</p>
         ) : (
@@ -517,11 +517,12 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   };
 
   return (
-    <div>
+    <div className="tm-page">
       <div
         style={{
           padding: "20px 20px 18px",
-          borderBottom: "1px solid var(--grid-2)",
+          borderRadius: 14,
+          border: "1px solid var(--grid)",
           background: "var(--panel)",
         }}
       >
@@ -563,7 +564,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
           )}
           {analyzing && (
             <span className="mono" style={{ fontSize: 12, color: "var(--ink-3)", marginLeft: 10 }}>
-              ◴ analyzing…
+              analyzing…
             </span>
           )}
         </p>
@@ -661,7 +662,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
           lead (badged), then the rest by cross-LLM leverage. */}
       <div className="tm-phead" style={{ borderTop: "none" }}>
         <h2 style={{ color: "var(--hot)", display: "flex", alignItems: "center", gap: 6 }}>
-          ⚑ Where to get listed
+          Where to get listed
           <InfoTip text="Third-party pages the LLMs cite that don't mention you yet, ranked by cross-LLM leverage (cited by all 3 = 'universal', shown first). We include only get-listable surfaces - roundups, reviews/directories, editorial, forums - and exclude homepages, single-product profile pages, off-niche sources, and dead links. The 'why list here' line is a gpt-4o-mini judgment that also names competitors already on the page." />
         </h2>
         <span className="meta">

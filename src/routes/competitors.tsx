@@ -43,13 +43,13 @@ const DECISIVE_LABEL: Record<DecisiveFactor, string> = {
   own_site: "its own dedicated pages",
 };
 
-function CompetitorsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
+export function CompetitorsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const profiles = buildCompetitorProfiles(audit, polls);
   const sovMax = Math.max(1, ...profiles.map((p) => p.sovPct));
   const llmDenom = llmsPolled(audit).length;
 
   return (
-    <div>
+    <div className="tm-page">
       <div className="tm-toolbar">
         <span className="tm-sort mono" style={{ paddingLeft: 16 }}>
           {profiles.length} brands · sorted by recommendation share
@@ -191,7 +191,7 @@ function ProfileCard({
       {/* Why it's named - audit-wide influence roll-up */}
       {rollup && (
         <div className="tm-insight" style={{ marginTop: 14, padding: 0 }}>
-          <div className="k">⚑ Why it's named</div>
+          <div className="k">Why it's named</div>
           <p>
             {p.name} is named in <b>{rollup.queriesNamed}/{rollup.totalQueries}</b>{" "}
             queries - driven mainly by <b>{DECISIVE_LABEL[rollup.dominant]}</b>

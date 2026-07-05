@@ -255,7 +255,7 @@ function OutcomeMix({ audit }: { audit: Audit }) {
   );
 }
 
-function AnalyticsView({ audit, pollsCount }: { audit: Audit; pollsCount: number }) {
+export function AnalyticsView({ audit, pollsCount }: { audit: Audit; pollsCount: number }) {
   const { audits } = useWorkspace();
 
   const runs: RunPoint[] = audits
@@ -278,7 +278,7 @@ function AnalyticsView({ audit, pollsCount }: { audit: Audit; pollsCount: number
       {/* FOCAL: visibility index over time */}
       <div className="tm-panel tm-gap-span tm-reveal">
         <div className="tm-phead">
-          <h2>▤ Visibility index · over time</h2>
+          <h2>Visibility index · over time</h2>
           <span className="meta">{runs.length} run{runs.length === 1 ? "" : "s"}</span>
         </div>
         {multi ? (
@@ -370,7 +370,7 @@ function AnalyticsView({ audit, pollsCount }: { audit: Audit; pollsCount: number
               </div>
             </div>
             <div className="tm-insight" style={{ paddingLeft: 0, paddingRight: 0 }}>
-              <div className="k">⚑ Need a baseline</div>
+              <div className="k">Need a baseline</div>
               <p>
                 Trends chart movement across runs of the same brand. Only{" "}
                 <b>one completed run</b> exists for {audit.brand_name} - run the
@@ -385,7 +385,7 @@ function AnalyticsView({ audit, pollsCount }: { audit: Audit; pollsCount: number
       {/* Coverage over runs - per ANSWER (one answer per query per LLM). */}
       <div className="tm-panel tm-reveal" style={{ animationDelay: ".05s" }}>
         <div className="tm-phead">
-          <h2>◫ Coverage · cited vs blind answers</h2>
+          <h2>Coverage · cited vs blind answers</h2>
           <span className="meta">{multi ? "per run" : "this run"}</span>
         </div>
         <CoverageBars runs={multi ? runs : [current]} />
@@ -397,7 +397,7 @@ function AnalyticsView({ audit, pollsCount }: { audit: Audit; pollsCount: number
         style={{ borderBottom: "none", animationDelay: ".1s" }}
       >
         <div className="tm-phead">
-          <h2>◐ Answer outcomes · this run</h2>
+          <h2>Answer outcomes · this run</h2>
           <span className="meta">{pollsCount} answers</span>
         </div>
         <OutcomeMix audit={audit} />

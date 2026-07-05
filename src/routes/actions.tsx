@@ -120,7 +120,7 @@ function refineAction(
   };
 }
 
-function ActionsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
+export function ActionsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const SEV: Record<"high" | "medium" | "low", number> = { high: 3, medium: 2, low: 1 };
   const multiLlm = llmsPolled(audit).length > 1;
 
@@ -183,7 +183,7 @@ function ActionsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
   const high = actions.filter((a) => a.severity === "high").length;
 
   return (
-    <div>
+    <div className="tm-page">
       <div className="tm-toolbar">
         <span className="tm-sort mono" style={{ paddingLeft: 16 }}>
           {actions.length} actions · {high} high-priority · sorted by impact ×
