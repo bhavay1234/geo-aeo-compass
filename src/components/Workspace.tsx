@@ -6,7 +6,7 @@ import {
   WorkspaceContext,
   type WorkspaceValue,
 } from "./terminal/workspace-context";
-import { StatusBar, TabNav } from "./terminal/Shell";
+import { Sidebar, TopBar } from "./terminal/Shell";
 
 export { useWorkspace } from "./terminal/workspace-context";
 
@@ -79,9 +79,11 @@ export function Workspace({ children }: { children: ReactNode }) {
   return (
     <WorkspaceContext.Provider value={value}>
       <div className="tm">
-        <StatusBar />
-        <TabNav />
-        {children}
+        <Sidebar />
+        <div className="tm-main">
+          <TopBar />
+          {children}
+        </div>
       </div>
     </WorkspaceContext.Provider>
   );

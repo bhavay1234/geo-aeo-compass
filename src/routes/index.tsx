@@ -99,25 +99,21 @@ function Index() {
   const error = validationError ?? (mutation.error as Error | null)?.message;
 
   return (
-    <div className="tm">
-      <div className="tm-statusbar">
-        <div className="tm-brand">
-          <span className="mk">✦</span> COMPASS
-        </div>
-        <div className="tm-cell">
-          <span className="l">Engine</span>
-          <span className="v">3 LLMs</span>
+    <div className="tm tm-solo">
+      <header className="tm-solohead">
+        <div className="tm-side-brand" style={{ padding: 0 }}>
+          <span className="mk">✦</span> Compass
         </div>
         <div className="tm-spacer" />
         <div className="tm-live">
           <span className="tm-blip" />
-          new audit
+          new audit · 3 LLMs
         </div>
-        <button className="tm-toggle" onClick={toggle} aria-label="Toggle theme">
-          <span>{theme === "dark" ? "LIGHT" : "DARK"}</span>
+        <button className="tm-toggle" onClick={toggle} aria-label="Toggle theme" style={{ flex: "0 0 auto" }}>
+          <span aria-hidden>{theme === "dark" ? "☾" : "☀"}</span>
           <span className="tm-sw" />
         </button>
-      </div>
+      </header>
 
       <div className="tm-grid" style={{ gridTemplateColumns: "1.4fr 1fr", gridTemplateRows: "auto" }}>
         {/* Run form */}

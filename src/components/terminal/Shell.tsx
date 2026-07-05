@@ -14,13 +14,22 @@ import { allCompetitorBrands, groupPollsByQuery, llmsPolled } from "./derive";
 import type { Audit } from "@/lib/db/types";
 
 const TABS = [
-  { key: "summary", label: "Summary", glyph: "◧", to: "/summary" as const },
+  { key: "summary", label: "Overview", glyph: "◧", to: "/summary" as const },
   { key: "queries", label: "Queries", glyph: "⌕", to: "/queries" as const },
   { key: "citations", label: "Citations", glyph: "❖", to: "/citations" as const },
   { key: "competitors", label: "Competitors", glyph: "⚇", to: "/competitors" as const },
   { key: "actions", label: "Actionables", glyph: "⚡", to: "/actions" as const },
   { key: "analytics", label: "Analytics", glyph: "▤", to: "/analytics" as const },
 ];
+
+const PAGE_TITLE: Record<string, string> = {
+  "/summary": "Overview",
+  "/queries": "Queries",
+  "/citations": "Citations",
+  "/competitors": "Competitors",
+  "/actions": "Actionables",
+  "/analytics": "Analytics",
+};
 
 function liveText(audit: Audit | null): string {
   const engines =
@@ -32,19 +41,116 @@ function liveText(audit: Audit | null): string {
     return `${engines} · running`;
   if (audit.status === "finalizing") return `${engines} · scoring`;
   if (audit.completed_at)
-    return `${engines} · ${formatDistanceToNow(new Date(audit.completed_at), { addSuffix: true })}`;
+    return `updated ${formatDistanceToNow(new Date(audit.completed_at), { addSuffix: true })}`;
   return engines;
 }
 
-export function StatusBar() {
+/** Vertical left-rail navigation: brand · target selector · sections · footer. */
+export function Sidebar() {
   const { audits, select, audit, polls } = useWorkspace();
   const { theme, toggle } = useTheme();
+  const loc = useLocation();
+  const path = loc.pathname;
 
   const score = audit?.visibility_score ?? null;
-  const llms = audit ? llmsPolled(audit) : [];
-  const multiLlm = llms.length > 1;
-  // Per-ANSWER counts: one answer per (query, LLM). On multi-LLM audits the
-  // cells are labeled accordingly so 5/18 reads as answers, not queries.
+
+  const queryCount = groupPollsByQuery(polls).size;
+  const actionQueries = new Set(
+    polls
+      .filter((p) => p.suggestion && p.suggestion.situation !== "winning")
+      .map((p) => p.query_text)
+  ).size;
+  const counts: Record<string, number> = {
+    queries: queryCount,
+    citations: audit?.citation_analysis?.length ?? 0,
+    competitors: audit ? allCompetitorBrands(audit, polls).length : 0,
+    actions: actionQueries,
+  };
+
+  return (
+    <aside className="tm-side">
+      <div className="tm-side-brand">
+        <span className="mk">✦</span> Compass
+      </div>
+
+      <div className="tm-side-target">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="tgt" aria-label="Select audit">
+              <span className="l">Target</span>
+              <span className="v">
+                {audit ? audit.brand_name : "—"}
+                {score != null && <span className="sc">{score}</span>}
+              </span>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-[300px]">
+            <DropdownMenuLabel>Audits</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            {audits.length === 0 ? (
+              <DropdownMenuItem disabled>No audits yet</DropdownMenuItem>
+            ) : (
+              audits.map((a) => (
+                <DropdownMenuItem
+                  key={a.id}
+                  onClick={() => select(a.id)}
+                  className="flex-col items-start gap-0.5"
+                >
+                  <span className="font-medium">{a.brand_name}</span>
+                  <span className="text-xs opacity-60">
+                    {a.domain} · {a.status}
+                  </span>
+                </DropdownMenuItem>
+              ))
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      <nav className="tm-side-nav" aria-label="Sections">
+        <div className="sec">Report</div>
+        {TABS.map((t) => {
+          const on = path === t.to;
+          const ct = counts[t.key];
+          return (
+            <Link
+              key={t.key}
+              to={t.to}
+              search={(prev) => ({ ...prev })}
+              className={`tm-navitem ${on ? "on" : ""}`}
+              aria-current={on ? "page" : undefined}
+            >
+              <span className="gl" aria-hidden>
+                {t.glyph}
+              </span>
+              {t.label}
+              {ct ? <span className="ct">{ct}</span> : null}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="tm-side-foot">
+        <Link to="/" className="tm-newaudit" aria-label="Start a new audit">
+          <span aria-hidden>+</span> New audit
+        </Link>
+        <button className="tm-toggle" onClick={toggle} aria-label="Toggle theme">
+          <span aria-hidden>{theme === "dark" ? "☾" : "☀"}</span>
+          <span className="tgl-lbl">{theme === "dark" ? "Dark" : "Light"} theme</span>
+          <span className="tm-sw" />
+        </button>
+      </div>
+    </aside>
+  );
+}
+
+/** Slim sticky header inside the main column: page title · metrics · live. */
+export function TopBar() {
+  const { audits, audit, polls } = useWorkspace();
+  const loc = useLocation();
+  const title = PAGE_TITLE[loc.pathname] ?? "Overview";
+
+  const score = audit?.visibility_score ?? null;
   const total = polls.length;
   const cited = polls.filter((p) => p.brand_cited).length;
   const blind = polls.filter((p) => !p.brand_cited).length;
@@ -68,124 +174,43 @@ export function StatusBar() {
   }
 
   return (
-    <div className="tm-statusbar">
-      <div className="tm-brand">
-        <span className="mk">✦</span> COMPASS
-      </div>
+    <header className="tm-topbar">
+      <span className="pg">{title}</span>
+      <div className="tm-spacer" />
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button className="tm-cell sel" aria-label="Select audit">
-            <span className="l">Target ▾</span>
-            <span className="v">{audit ? audit.brand_name.toUpperCase() : "—"}</span>
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-[320px]">
-          <DropdownMenuLabel>Audits</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          {audits.length === 0 ? (
-            <DropdownMenuItem disabled>No audits yet</DropdownMenuItem>
-          ) : (
-            audits.map((a) => (
-              <DropdownMenuItem
-                key={a.id}
-                onClick={() => select(a.id)}
-                className="flex-col items-start gap-0.5"
-              >
-                <span className="font-medium">{a.brand_name}</span>
-                <span className="text-xs opacity-60">
-                  {a.domain} · {a.status}
-                </span>
-              </DropdownMenuItem>
-            ))
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-
-      <div className="tm-cell">
-        <span className="l">Visibility</span>
-        <span className="v">{score ?? "—"}</span>
-      </div>
-      <div className="tm-cell">
-        <span className="l">Δ vs prior</span>
-        <span className={`v ${delta != null ? (delta >= 0 ? "pos" : "neg") : ""}`}>
-          {delta == null ? "—" : delta >= 0 ? `+${delta}` : `${delta}`}
-        </span>
-      </div>
-      <div className="tm-cell" title="AI answers where your brand is cited (one answer per query per LLM)">
-        <span className="l">{multiLlm ? "Answers cited" : "Cited"}</span>
-        <span className="v">{total ? `${cited}/${total}` : "—"}</span>
-      </div>
-      <div className="tm-cell" title="AI answers where your brand does not appear">
-        <span className="l">Blind spots</span>
-        <span className={`v ${blind > 0 ? "hot" : ""}`}>{total ? blind : "—"}</span>
-      </div>
-      {multiLlm && (
-        <div className="tm-cell" title={llms.map((l) => l.toUpperCase()).join(" · ")}>
-          <span className="l">LLMs</span>
-          <span className="v">{llms.length}</span>
+      {score != null && (
+        <div className="tm-metric" title="Overall visibility score">
+          <span className="l">Visibility</span>
+          <span className="v">{score}</span>
+        </div>
+      )}
+      {delta != null && (
+        <div className="tm-metric" title="Change vs your prior audit">
+          <span className="l">Δ prior</span>
+          <span className={`v ${delta >= 0 ? "pos" : "neg"}`}>
+            {delta >= 0 ? `+${delta}` : `${delta}`}
+          </span>
+        </div>
+      )}
+      {total > 0 && (
+        <div className="tm-metric" title="AI answers citing your brand (one per query per LLM)">
+          <span className="l">Cited</span>
+          <span className="v">
+            {cited}/{total}
+          </span>
+        </div>
+      )}
+      {total > 0 && (
+        <div className="tm-metric" title="AI answers where your brand does not appear">
+          <span className="l">Blind</span>
+          <span className={`v ${blind > 0 ? "hot" : ""}`}>{blind}</span>
         </div>
       )}
 
-      <div className="tm-spacer" />
       <div className="tm-live">
         <span className="tm-blip" />
         {liveText(audit)}
       </div>
-      <Link
-        to="/"
-        className="tm-toggle"
-        style={{ borderRight: "1px solid var(--grid)", textDecoration: "none" }}
-        aria-label="Start a new audit"
-      >
-        <span>+ NEW AUDIT</span>
-      </Link>
-      <button className="tm-toggle" onClick={toggle} aria-label="Toggle theme">
-        <span>{theme === "dark" ? "LIGHT" : "DARK"}</span>
-        <span className="tm-sw" />
-      </button>
-    </div>
-  );
-}
-
-export function TabNav() {
-  const { polls, audit } = useWorkspace();
-  const loc = useLocation();
-  const path = loc.pathname;
-
-  // Distinct QUERIES for the Queries/Actionables chips (multi-LLM audits have
-  // N polls per query; the tabs now show one row per query).
-  const queryCount = groupPollsByQuery(polls).size;
-  const actionQueries = new Set(
-    polls
-      .filter((p) => p.suggestion && p.suggestion.situation !== "winning")
-      .map((p) => p.query_text)
-  ).size;
-  const counts: Record<string, number> = {
-    queries: queryCount,
-    citations: audit?.citation_analysis?.length ?? 0,
-    competitors: audit ? allCompetitorBrands(audit, polls).length : 0,
-    actions: actionQueries,
-  };
-
-  return (
-    <nav className="tm-tabs" aria-label="Sections">
-      {TABS.map((t) => {
-        const on = path === t.to;
-        const ct = counts[t.key];
-        return (
-          <Link
-            key={t.key}
-            to={t.to}
-            search={(prev) => ({ ...prev })}
-            className={`tm-tab ${on ? "on" : ""}`}
-            aria-current={on ? "page" : undefined}
-          >
-            <span aria-hidden>{t.glyph}</span> {t.label}
-            {ct ? <span className="ct">{ct}</span> : null}
-          </Link>
-        );
-      })}
-    </nav>
+    </header>
   );
 }
