@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Workspace, useWorkspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
@@ -11,6 +12,7 @@ import {
   llmsPolled,
   topGetListedTargets,
   type GapRow,
+  type CompetitorRow,
 } from "@/components/terminal/derive";
 import type {
   Audit,
@@ -34,6 +36,88 @@ export const Route = createFileRoute("/summary")({
   head: () => ({ meta: [{ title: "Summary — Compass" }] }),
   component: SummaryPage,
 });
+
+type Metric = "visibility" | "sentiment" | "position";
+
+/** Tabbed competitor comparison — Visibility / Sentiment / Position, mirroring a
+ *  tracking dashboard's metric toggle (bars, since trend needs multiple runs). */
+function MetricComparison({ rows }: { rows: CompetitorRow[] }) {
+  const hasSent = rows.some((r) => r.sentiment != null);
+  const [metric, setMetric] = useState<Metric>("visibility");
+  const m: Metric = metric === "sentiment" && !hasSent ? "visibility" : metric;
+  const tabs: { k: Metric; label: string }[] = [
+    { k: "visibility", label: "Visibility" },
+    ...(hasSent ? [{ k: "sentiment" as Metric, label: "Sentiment" }] : []),
+    { k: "position", label: "Position" },
+  ];
+  const maxPos = Math.max(2, ...rows.map((r) => r.avgPosition ?? 0));
+  const rawVal = (r: CompetitorRow) =>
+    m === "visibility" ? r.visibilityPct : m === "sentiment" ? r.sentiment ?? 0 : r.avgPosition;
+  const barPct = (r: CompetitorRow) => {
+    if (m === "position") {
+      const p = r.avgPosition;
+      return p == null ? 0 : Math.round((1 - (p - 1) / (maxPos - 1)) * 100);
+    }
+    return (rawVal(r) as number) ?? 0;
+  };
+  const display = (r: CompetitorRow) =>
+    m === "position"
+      ? r.avgPosition != null
+        ? r.avgPosition.toFixed(1)
+        : "—"
+      : `${(rawVal(r) as number) ?? 0}${m === "visibility" ? "%" : ""}`;
+  const sorted = [...rows].sort((a, b) =>
+    m === "position"
+      ? (a.avgPosition ?? 99) - (b.avgPosition ?? 99)
+      : ((rawVal(b) as number) ?? 0) - ((rawVal(a) as number) ?? 0)
+  );
+  const hint =
+    m === "position" ? "lower is better · longer bar = better rank" : "higher is better";
+
+  return (
+    <div style={{ padding: "16px 20px 18px", borderBottom: "1px solid var(--grid-2)", background: "var(--bg)" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "inline-flex", gap: 4, padding: 3, background: "var(--panel-2)", borderRadius: 8 }}>
+          {tabs.map((t) => (
+            <button
+              key={t.k}
+              onClick={() => setMetric(t.k)}
+              style={{
+                border: "none",
+                borderRadius: 6,
+                padding: "5px 14px",
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                background: m === t.k ? "var(--bg)" : "transparent",
+                color: m === t.k ? "var(--ink)" : "var(--ink-2)",
+              }}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>{hint}</span>
+      </div>
+      {sorted.map((r) => (
+        <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, width: 150, minWidth: 150 }}>
+            <Favicon domain={r.domain} size={15} />
+            <span style={{ fontSize: 12.5, fontWeight: r.isYou ? 800 : 500, color: r.isYou ? "var(--you)" : "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {r.name}
+            </span>
+          </span>
+          <span style={{ flex: 1, height: 8, background: "var(--grid)", borderRadius: 4, overflow: "hidden" }}>
+            <span style={{ display: "block", height: "100%", width: `${Math.max(0, Math.min(100, barPct(r)))}%`, background: r.isYou ? "var(--you)" : "var(--ink-3)" }} />
+          </span>
+          <span className="mono" style={{ fontSize: 12, width: 46, textAlign: "right", color: "var(--ink-2)", fontWeight: 700 }}>
+            {display(r)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function SummaryPage() {
   return (
@@ -466,6 +550,9 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
           ))
         )}
       </div>
+
+      {/* METRIC TABS — Visibility / Sentiment / Position comparison. */}
+      {compTable.length > 0 && <MetricComparison rows={compTable} />}
 
       {/* COMPETITOR COMPARISON — you vs rivals: visibility share + avg position. */}
       {compTable.length > 0 && (
