@@ -33,7 +33,7 @@ export async function fetchPageSignals(url: string): Promise<ExtractedPage | nul
     if (!ct.includes('html') && ct !== '') return null;
     const html = (await res.text()).slice(0, MAX_HTML_BYTES);
     if (!html.trim()) return null;
-    // res.url is the final URL after redirects — the real page behind Gemini's
+    // res.url is the final URL after redirects - the real page behind Gemini's
     // vertexaisearch proxy (with its deep path), captured for free here.
     return extractSignals(url, html, res.status, 'fetch', res.url);
   } catch {
@@ -147,7 +147,7 @@ function extractSchemaTypes(html: string): string[] {
     try {
       walkTypes(JSON.parse(m[1].trim()), out);
     } catch {
-      // malformed JSON-LD — skip
+      // malformed JSON-LD - skip
     }
   }
   return Array.from(out);

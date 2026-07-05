@@ -14,7 +14,7 @@ import appCss from "../styles.css?url";
 // module so its createServerFn() calls land in the server-fn resolver
 // manifest. Without an import, /_serverFn/* requests fail with
 // "Server function info not found". Located outside src/lib/server/ to
-// avoid the lovable preset's `**/server/**` client-import denial — the
+// avoid the lovable preset's `**/server/**` client-import denial - the
 // createServerFn() calls in this file are isomorphic-safe; their handler
 // bodies are stripped from the client bundle by the Vite plugin.
 import "../lib/api/audit";
@@ -99,7 +99,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       },
       {
         rel: "stylesheet",
-        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap",
+        href: "https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap",
       },
       {
         rel: "stylesheet",

@@ -215,7 +215,7 @@ function bestOwnPage(query: string, candidates: CrawledPage[]): CrawledPage | nu
   return score > 0 ? best : null;
 }
 
-/** Best-effort citation_status write — never throws (a missing column / DB
+/** Best-effort citation_status write - never throws (a missing column / DB
  *  error is logged, not propagated), so the terminal-state guard can't fail. */
 async function setStatus(
   supabase: SupabaseClient,
@@ -239,8 +239,8 @@ const STATUS_UA =
 /**
  * Lightweight liveness + final-URL probe for a cited URL. HEAD first (cheap),
  * GET fallback when HEAD is rejected. Follows redirects, so `finalUrl` is the
- * real destination — resolving Gemini's vertexaisearch grounding proxies to the
- * actual page. status 0 = unknown (network error/timeout) — never treated dead.
+ * real destination - resolving Gemini's vertexaisearch grounding proxies to the
+ * actual page. status 0 = unknown (network error/timeout) - never treated dead.
  */
 async function resolveUrlStatus(url: string): Promise<{ status: number; finalUrl: string }> {
   const controller = new AbortController();
@@ -269,7 +269,7 @@ async function resolveUrlStatus(url: string): Promise<{ status: number; finalUrl
 }
 
 /**
- * Resolve a Gemini vertexaisearch proxy URL to its real destination CHEAPLY —
+ * Resolve a Gemini vertexaisearch proxy URL to its real destination CHEAPLY -
  * a manual-redirect GET that reads the Location header without downloading the
  * page body. Returns the real URL or null. Much lighter than a full page fetch,
  * so we can resolve many without blowing the subrequest/CPU budget.
@@ -296,8 +296,8 @@ async function resolveRedirect(url: string): Promise<string | null> {
 // ── main ─────────────────────────────────────────────────────────────────
 
 /**
- * Post-finalize influence analysis. The question is "ChatGPT NAMED brand X —
- * what influenced that, and why not you?" — led by which CITED SOURCES name X
+ * Post-finalize influence analysis. The question is "ChatGPT NAMED brand X -
+ * what influenced that, and why not you?" - led by which CITED SOURCES name X
  * (Factor 1), then cross-audit third-party presence (Factor 2), then own-site
  * (Factor 3, least). Runs in the dedicated citations queue stage.
  */
@@ -315,7 +315,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   const brandDomain: string = audit.domain;
   const ownNorm = normalizeDomain(brandDomain);
 
-  // Real rival domains (tracked + intent-classified) — used to PRIORITIZE their
+  // Real rival domains (tracked + intent-classified) - used to PRIORITIZE their
   // cited pages into the fetch set so every competitor page resolves its deep
   // URL (not just the top-150 by leverage).
   const competitorDomains = new Set<string>();
@@ -333,7 +333,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     competitorDomains.has(d) || [...competitorDomains].some((cd) => d.endsWith('.' + cd));
 
   // Terminal-state guard: mark 'analyzing' up front and ALWAYS finish at 'done'
-  // in finally — a thrown Apify / verdict / DB error can never leave the stage
+  // in finally - a thrown Apify / verdict / DB error can never leave the stage
   // stuck on 'analyzing' (or null) and hang the UI.
   await setStatus(supabase, auditId, 'analyzing');
   let terminal: 'done' | 'failed' = 'done';
@@ -345,7 +345,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   const polls = (pollData as PollRow[]) || [];
 
   // ── Part 1/2: fetch every cited URL, brand presence (us), Citations rollup ──
-  // Track distinct QUERY texts and distinct LLMs per URL — the two multi-LLM
+  // Track distinct QUERY texts and distinct LLMs per URL - the two multi-LLM
   // leverage signals. Universal sources (cited by all LLMs across many queries)
   // are the get-listed priority.
   const urlMeta = new Map<
@@ -380,7 +380,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   // Bound the heaviest cost on large (20-query) audits: only fetch page signals
   // for the top-N URLs by cross-LLM leverage. Without this, a 200+ URL audit
   // exhausts the Worker subrequest budget and the stage is killed mid-run,
-  // hanging citation_status on 'analyzing'. Lower-ranked sources still appear —
+  // hanging citation_status on 'analyzing'. Lower-ranked sources still appear -
   // just without brand-presence / status.
   const PAGE_FETCH_CAP = 150;
   const rankedUrls = allUrls.slice().sort((a, b) => {
@@ -396,7 +396,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   const fetchUrls = [...compUrls, ...nonCompUrls].slice(0, Math.max(PAGE_FETCH_CAP, compUrls.length));
   const pages = await resolveSignals(supabase, fetchUrls, env);
 
-  // Status probe — ONLY the dead candidates among the fetched set (content fetch
+  // Status probe - ONLY the dead candidates among the fetched set (content fetch
   // returned nothing: 404 / block / non-html), hard-capped so it can never
   // dominate the budget. Gemini vertexaisearch redirects are resolved to their
   // real domain-root DETERMINISTICALLY below (no network). Never throws.
@@ -413,7 +413,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   // Gemini wraps EVERY source in a vertexaisearch proxy; only the few we
   // page-fetched have their real deep URL, so most collapse to a domain-root
   // (homepage) and the Gemini-only view looks empty. Resolve the rest CHEAPLY
-  // (manual-redirect Location read, no body) — bounded + non-fatal — so they
+  // (manual-redirect Location read, no body) - bounded + non-fatal - so they
   // categorize as real content.
   const GEMINI_RESOLVE_CAP = 140;
   const geminiFinal = new Map<string, string>();
@@ -448,8 +448,8 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
         ? page.signals.http_status
         : undefined;
     // Real destination URL. For Gemini's vertexaisearch proxy: the DEEP page URL
-    // captured from the content fetch (res.url) when we fetched it — so a cited
-    // competitor article shows its real path, not the bare homepage — else a
+    // captured from the content fetch (res.url) when we fetched it - so a cited
+    // competitor article shows its real path, not the bare homepage - else a
     // clean domain-root fallback. Non-Gemini: the probe's resolved URL, then the
     // fetch's final URL.
     const pageFinal = page?.signals.final_url;
@@ -477,7 +477,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
 
   // Merge entries that resolve to the SAME real destination. Gemini wraps every
   // source in a unique vertexaisearch proxy, and redirects (/blog → /post) give
-  // the same page different `url` keys — so one page was landing as 2–3 separate
+  // the same page different `url` keys - so one page was landing as 2–3 separate
   // single-LLM entries, undercounting the cross-LLM leverage signal (the
   // universal-source ranking) and duplicating worklist rows. Key on the resolved
   // destination (host + path, query/trailing-slash stripped), union LLMs +
@@ -534,7 +534,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   });
   const targetNamedUrls = new Set(analysis.filter((a) => a.brand_present).map((a) => a.url));
 
-  // Semantic niche filter for roundup/listicle sources — separates a genuine
+  // Semantic niche filter for roundup/listicle sources - separates a genuine
   // in-category "best X" list from one that merely shares a word ("trade
   // finance" / stock "trading" for a supply-chain brand). Keyword matching can't
   // tell these apart; an LLM judgment can. Mutates entries in place; non-fatal.
@@ -543,7 +543,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     for (const c of p.citations ?? [])
       if (c.url && c.title && !titleByUrl.has(c.url)) titleByUrl.set(c.url, c.title);
   // Judge every get-listable CONTENT surface (roundups, editorial, videos, social,
-  // community) — not vendor/competitor/review-directory pages, which are inherently
+  // community) - not vendor/competitor/review-directory pages, which are inherently
   // in-niche or handled elsewhere. Anchored on the brand's real competitors.
   const JUDGE_CATS = new Set([
     'listicles', 'editorial', 'youtube', 'community', 'reddit', 'linkedin', 'pr', 'reviews',
@@ -599,7 +599,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
     for (const b of top) analyzedBrands.set(b.toLowerCase(), b);
   }
 
-  // Per-brand sentiment across the answers (you + named competitors) — merged
+  // Per-brand sentiment across the answers (you + named competitors) - merged
   // into insights.sentiment. Non-fatal; the audit stands without it.
   try {
     const sentimentBrands = [you, ...Array.from(analyzedBrands.values())];
@@ -661,7 +661,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
         .filter((u) => u && pages.get(u));
       const citedTotal = citedUrls.length;
 
-      // Target ("you") influence on this query — computed once.
+      // Target ("you") influence on this query - computed once.
       const ownC = ownByPoll.get(p.id) ?? null;
       const ownSignals = ownC ? ownSig.get(ownC.url)?.signals : undefined;
       const youNamed = citedUrls
@@ -740,7 +740,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
   );
 
     console.log(
-      `[citations] audit ${auditId} — ${analysis.length} sources, ` +
+      `[citations] audit ${auditId} - ${analysis.length} sources, ` +
         `${analysis.filter((a) => a.brand_present).length} naming you, ` +
         `${analyzedBrands.size} brands analyzed`
     );
@@ -757,7 +757,7 @@ export async function analyzeCitations(auditId: string, env: Env): Promise<void>
       String(err?.stack || '').slice(0, 400)
     );
   } finally {
-    // Guaranteed terminal state — never leave the UI stuck on 'analyzing'.
+    // Guaranteed terminal state - never leave the UI stuck on 'analyzing'.
     // 'done' on success (partial data kept), 'failed' on a thrown error.
     await setStatus(supabase, auditId, terminal);
   }

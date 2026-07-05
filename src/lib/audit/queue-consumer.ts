@@ -24,7 +24,7 @@ export interface QueueMessageLike<T> {
 /**
  * Append a poll-failure breadcrumb to audits.error_message so failures are
  * diagnosable straight from the DB (no Cloudflare log access needed). Keeps
- * the last ~1000 chars; never throws — diagnostics must not break the run.
+ * the last ~1000 chars; never throws - diagnostics must not break the run.
  */
 async function recordPollFailure(
   supabase: ReturnType<typeof getSupabaseAdmin>,
@@ -113,7 +113,7 @@ export async function processQueueBatch(
         // Dispatch to the right LLM poller. Default 'chatgpt' keeps legacy
         // single-LLM messages (no llm_source field) working unchanged.
         // ChatGPT: direct OpenAI when OPENAI_API_KEY is configured (richer
-        // inline-citation annotations), DataForSEO otherwise — the tool runs
+        // inline-citation annotations), DataForSEO otherwise - the tool runs
         // fully on DFS credentials alone.
         const llm: LlmSource = (msg.body.llm_source ?? 'chatgpt') as LlmSource;
         const result =
@@ -164,7 +164,7 @@ export async function processQueueBatch(
           grounded: c.grounded,
         }));
 
-        // Faithful inline trail — ordered, un-deduped, anchor text + source_type.
+        // Faithful inline trail - ordered, un-deduped, anchor text + source_type.
         const rawCitations: InlineCitation[] = result.raw_citations.map((rc) => ({
           ...rc,
           source_type: classify(rc.domain),
@@ -216,7 +216,7 @@ export async function processQueueBatch(
           suggestion,
         });
 
-        // Atomic counter bump via Postgres function — avoids the read/write
+        // Atomic counter bump via Postgres function - avoids the read/write
         // race that would happen if we SELECT then UPDATE across parallel
         // consumer workers.
         await supabase.rpc('increment_progress', {

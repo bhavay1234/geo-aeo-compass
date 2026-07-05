@@ -44,7 +44,7 @@ function stripFences(s: string): string {
 }
 
 /**
- * Infer the brand's positioning from limited signals — ONE gpt-4o-mini call.
+ * Infer the brand's positioning from limited signals - ONE gpt-4o-mini call.
  * Honest caveat: this is inference from queries + answer excerpts, weaker than
  * a homepage scrape (the v1.1 Apify upgrade). Returns '' on any failure.
  */
@@ -98,7 +98,7 @@ export async function inferPositioning(
           typeof parsed.category === 'string' ? parsed.category.trim() : '',
       };
     } catch {
-      // Model ignored the JSON contract — treat the whole reply as positioning.
+      // Model ignored the JSON contract - treat the whole reply as positioning.
       return { positioning: raw, category: '' };
     }
   } catch (err: any) {
@@ -109,11 +109,11 @@ export async function inferPositioning(
 
 const VERDICT_SYSTEM =
   "You answer 'what is [company]?' in ONE concise sentence: what it does and " +
-  "who it's for — how you would categorize it. No preamble, no markdown, no " +
+  "who it's for - how you would categorize it. No preamble, no markdown, no " +
   'quotes. If you genuinely do not recognize it, reply exactly: Not well known.';
 
 /**
- * "How ChatGPT describes [brand]" — one gpt-4o-mini 'what is X?' poll per
+ * "How ChatGPT describes [brand]" - one gpt-4o-mini 'what is X?' poll per
  * brand, batched in finalize. Returns '' on any failure.
  */
 export async function inferBrandVerdict(
@@ -167,16 +167,16 @@ const INFLUENCE_SYSTEM =
   '- EXACTLY 2 sentences, tight. Sentence 1: the single most decisive factor for X ' +
   '(citations, third-party presence, or own-site) with the concrete number. ' +
   'Sentence 2: why the target was NOT named + the closest gap to close.\n' +
-  '- VARY your wording per brand — do NOT reuse a fixed template. Never open every ' +
+  '- VARY your wording per brand - do NOT reuse a fixed template. Never open every ' +
   'verdict with "N of the ten cited sources..."; lead differently each time (the ' +
   'source type, the cross-audit pattern, the own-page gap) and cite the number ' +
   'inline. Two brands with similar signals must still read as distinct sentences.\n' +
-  '- Use "likely/primarily" framing — these signals correlate with ChatGPT citation, ' +
+  '- Use "likely/primarily" framing - these signals correlate with ChatGPT citation, ' +
   'they are NOT proof of its ranking algorithm. Never claim to know its exact logic.\n' +
   '- No preamble, no markdown, no bullet points, no restating the brand name twice.';
 
 /**
- * "Why was brand X named (and not you)" — ONE gpt-4o-mini call over the
+ * "Why was brand X named (and not you)" - ONE gpt-4o-mini call over the
  * three-factor signal summary only. Returns '' on failure so the caller can
  * fall back to the deterministic influence verdict.
  */
@@ -252,7 +252,7 @@ const SUGGESTION_SYSTEM =
   '"competitor"|"source"|"unsure"}], "brands_named": [string]}';
 
 /**
- * Positioning-aware per-query suggestion + per-citation role judgments —
+ * Positioning-aware per-query suggestion + per-citation role judgments -
  * ONE gpt-4o-mini call. Returns null on any failure so the caller can fall
  * back to the deterministic suggestion.
  */
@@ -345,8 +345,8 @@ export async function generateQuerySuggestion(
 const CLASSIFY_SYSTEM =
   'You are given an AUDITED brand (name, category, positioning) and a list of ' +
   'BRAND NAMES that AI assistants surfaced when answering buyer queries in this ' +
-  'space. Decide which are GENUINE competitors — a product a buyer could ' +
-  'realistically choose INSTEAD of the audited brand — judged by INTENT and ' +
+  'space. Decide which are GENUINE competitors - a product a buyer could ' +
+  'realistically choose INSTEAD of the audited brand - judged by INTENT and ' +
   'FEATURES, not by how often the name appeared. Rules:\n' +
   '1. CONSOLIDATE product variants of the same company to ONE parent brand ' +
   '("Oracle Transportation Management", "Oracle SCM Cloud" → "Oracle"; ' +
@@ -358,7 +358,7 @@ const CLASSIFY_SYSTEM =
   'Power BI, Qlik, Excel, SAS), accounting-only software (Sage), freight carriers ' +
   'or 3PLs that are not software products (Schneider), and anything outside this ' +
   'software space. When unsure whether something is a real product rival, DROP it.\n' +
-  '4. "domain" = the company\'s OFFICIAL website domain from your knowledge — the ' +
+  '4. "domain" = the company\'s OFFICIAL website domain from your knowledge - the ' +
   'real registrable domain, correct TLD (e.g. "onebeat.co", "portcast.io", ' +
   '"loginext.com"), lowercase, no protocol/path/www. Do NOT just append ".com" to ' +
   'the name; if you are not confident of the real domain, use "".\n' +
@@ -367,7 +367,7 @@ const CLASSIFY_SYSTEM =
 
 /**
  * Map discovered brand names to genuine same-category competitors by intent +
- * features — ONE gpt-4o-mini call. Consolidates variants, drops wrong-category
+ * features - ONE gpt-4o-mini call. Consolidates variants, drops wrong-category
  * noise. Returns [] on no key / failure so the caller falls back to the
  * recurrence heuristic. This is the judgment that replaces the ">= 2 queries"
  * gate: a real rival named once survives; a one-off BI tool does not.
@@ -444,7 +444,7 @@ const NICHE_SYSTEM =
   '(Alibaba / IndiaMART-style); unrelated industries.\n' +
   'listable = can the brand REALISTICALLY BE ADDED to THIS page? TRUE only when the ' +
   'page already covers MULTIPLE (TWO OR MORE) different vendors/products in the ' +
-  'category — a "best/top X" roundup, a multi-product comparison or ranking, a ' +
+  'category - a "best/top X" roundup, a multi-product comparison or ranking, a ' +
   'category directory, or a forum/Q&A/video that weighs SEVERAL tools. ' +
   'listable=FALSE when the page centers on ONE brand or a single event/opinion: a ' +
   'single-product review or profile page; a single-company news story (e.g. ' +
@@ -452,11 +452,11 @@ const NICHE_SYSTEM =
   "release about one company; a vendor's own page; or a general thought-leadership/" +
   'opinion article that ranks NO products (e.g. "AI agents shouldn\'t run your ' +
   'supply chain"). If it names FEWER THAN TWO category vendors, listable=FALSE. ' +
-  'When in doubt, listable=FALSE — we can only get listed where ≥2 competitors ' +
+  'When in doubt, listable=FALSE - we can only get listed where ≥2 competitors ' +
   'already are.\n' +
   'reason (ONLY when relevant AND listable; ONE specific sentence fitting the ' +
-  'FORMAT — "get listed" for a roundup/directory, "get mentioned in this thread" ' +
-  'for a forum/post/Q&A, "get featured" for a video — and it MUST name TWO ' +
+  'FORMAT - "get listed" for a roundup/directory, "get mentioned in this thread" ' +
+  'for a forum/post/Q&A, "get featured" for a video - and it MUST name TWO ' +
   'competitors/products already present on the page). No generic filler.\n' +
   'Return ONLY JSON: ' +
   '{"items":[{"i":number,"relevant":boolean,"listable":boolean,"reason":string}]}.';
@@ -473,7 +473,7 @@ export interface GetListedVerdict {
  * For each cited content source: is it a place the brand should get listed, and
  * if so WHY (one line). Semantic + competitor-anchored, so it separates "global
  * trade software" from "trade finance" / stock "trading" / fleet "route
- * optimization" — and asking for a concrete reason forces out the off-niche ones.
+ * optimization" - and asking for a concrete reason forces out the off-niche ones.
  * Batched (≤25/call, gpt-4o-mini). Returns a verdict per input item. On no key /
  * failure returns relevant=true with no reason so nothing is wrongly hidden.
  */
@@ -511,7 +511,7 @@ export async function judgeGetListedSources(
     try {
       const completion = await withTimeout(
         openai.chat.completions.create({
-          model: MODEL, // gpt-4o-mini — OpenAI's low-cost tier
+          model: MODEL, // gpt-4o-mini - OpenAI's low-cost tier
           temperature: 0.1,
           max_tokens: 900,
           messages: [
@@ -554,7 +554,7 @@ export async function judgeGetListedSources(
 
 /**
  * Pick the final buyer queries for a Brand-DNA audit from DataForSEO Labs
- * candidates, with real judgment — DROPs off-category keywords that merely
+ * candidates, with real judgment - DROPs off-category keywords that merely
  * share words ("transportation LEARNING management"), DIVERSIFIES across
  * sub-topics instead of 20 rewordings of one phrase, and honors intent mode.
  * Because each query is asked to a COLD assistant with no memory of the brand,
@@ -562,10 +562,10 @@ export async function judgeGetListedSources(
  * otherwise resolve to a different vertical ("global trade platforms" → stock
  * trading / B2B marketplaces). Keywords are returned verbatim EXCEPT such
  * disambiguating rewrites (the caller tolerates a keyword absent from the volume
- * map — it just carries volume 0). Returns [] when no key / on failure.
+ * map - it just carries volume 0). Returns [] when no key / on failure.
  */
 /**
- * Sentiment of HOW each brand is portrayed across the AI answers — a 0–100
+ * Sentiment of HOW each brand is portrayed across the AI answers - a 0–100
  * score (0 = criticized, 55 ≈ neutrally listed, 100 = glowing). One low-cost
  * gpt-4o-mini call over the concatenated answers. Keyed by lowercased brand.
  * Returns {} on no key / failure so the audit is unaffected.
@@ -638,15 +638,15 @@ export async function selectBuyerQueries(
       : 'Allow a mix of commercial and informational intent.';
   const system =
     `You select buyer search queries for an AI-visibility (AEO) audit. Each query ` +
-    `is asked to a COLD AI assistant with NO memory of this brand or user — so a ` +
+    `is asked to a COLD AI assistant with NO memory of this brand or user - so a ` +
     `query must SELF-DISAMBIGUATE: on its own words it must signal THIS category/` +
     `vertical, or a cold assistant will answer about a different industry. From the ` +
     `CANDIDATE keywords (each with monthly search volume "v"), choose up to ${limit} ` +
     `that best capture how real buyers research THIS product category. Rules:\n` +
-    `(1) genuinely in the brand's category — DROP keywords that merely share a word ` +
+    `(1) genuinely in the brand's category - DROP keywords that merely share a word ` +
     `but name a DIFFERENT category (e.g. "transportation learning management", ` +
     `"document management" for a freight-visibility brand).\n` +
-    `(2) AMBIGUITY GUARD — DROP or REWRITE any keyword a cold assistant would read ` +
+    `(2) AMBIGUITY GUARD - DROP or REWRITE any keyword a cold assistant would read ` +
     `as a different vertical. E.g. for a supply-chain/logistics brand: "global ` +
     `trade platforms" reads as B2B sourcing marketplaces (Alibaba) or STOCK ` +
     `trading; "trade platforms" reads as stock/forex brokers. Prefer the ` +
@@ -655,7 +655,7 @@ export async function selectBuyerQueries(
     `trade management software", "best trade platforms" → "best supply chain ` +
     `visibility platforms") so the cold assistant lands in the right vertical. ` +
     `Never invent a query outside the category.\n` +
-    `(3) DIVERSE — cover distinct sub-topics/use-cases, NEVER many near-duplicate ` +
+    `(3) DIVERSE - cover distinct sub-topics/use-cases, NEVER many near-duplicate ` +
     `rewordings of one phrase.\n` +
     `(4) ${intentLine}\n` +
     `(5) drop location-specific ("... india", city/state) and navigational lookups.\n` +

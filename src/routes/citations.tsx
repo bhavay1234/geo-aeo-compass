@@ -19,7 +19,7 @@ import type {
 } from "@/lib/db/types";
 
 /** Broken link: permanently/really dead. Bot-block / auth / rate-limit statuses
- *  (401/403/429) are NOT dead — the page exists, it just refused our probe. */
+ *  (401/403/429) are NOT dead - the page exists, it just refused our probe. */
 function isDeadLink(e: CitationAnalysisEntry): boolean {
   const s = e.status_code;
   return s != null && s >= 400 && s !== 401 && s !== 403 && s !== 429;
@@ -32,7 +32,7 @@ const LLM_LABEL: Record<LlmSource, string> = {
 };
 
 export const Route = createFileRoute("/citations")({
-  head: () => ({ meta: [{ title: "Citations — Compass" }] }),
+  head: () => ({ meta: [{ title: "Citations - Compass" }] }),
   component: CitationsPage,
 });
 
@@ -83,7 +83,7 @@ function Row({
 }) {
   const k = KIND[e.source_type] ?? KIND.other;
   const citingCount = (e.llms_citing ?? []).length || 1;
-  // Real destination — resolves Gemini's vertexaisearch redirect to the actual page.
+  // Real destination - resolves Gemini's vertexaisearch redirect to the actual page.
   const link = e.resolved_url || e.url;
   return (
     <div className="tm-card" style={{ position: "relative" }}>
@@ -107,7 +107,7 @@ function Row({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <Favicon domain={e.domain} size={16} />
-            {/* Page title — the real link text, not just the bare domain. */}
+            {/* Page title - the real link text, not just the bare domain. */}
             <a
               href={link}
               target="_blank"
@@ -130,7 +130,7 @@ function Row({
                   color: "var(--warn)",
                   textTransform: "uppercase",
                 }}
-                title="Cited by multiple LLMs — a universal citation source"
+                title="Cited by multiple LLMs - a universal citation source"
               >
                 Universal · {citingCount}/{llmCount}
               </span>
@@ -231,11 +231,11 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     return qs.length === 0 ? "" : qs.length <= 2 ? qs.join(", ") : `${qs[0]} +${qs.length - 1} more`;
   };
 
-  // Niche vocabulary RELATIVE TO THIS BRAND — drawn from its category, buyer
+  // Niche vocabulary RELATIVE TO THIS BRAND - drawn from its category, buyer
   // queries, positioning, DNA (seeds/products), and its competitors. A listicle
   // is on-niche if it shares this vocabulary. This is category-aware: for an HR
   // brand, "best HR software" IS the niche and is kept; for a supply-chain brand
-  // it isn't. No universal blocklist — relevance is always relative to the brand.
+  // it isn't. No universal blocklist - relevance is always relative to the brand.
   const nicheTerms = useMemo(() => {
     const STOP = new Set([
       "best", "top", "software", "tools", "tool", "platform", "platforms", "solution",
@@ -292,7 +292,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         {analyzing ? (
           <p className="mono">◴ Analyzing cited sources…</p>
         ) : failed ? (
-          <p>Citation analysis was unavailable for this run — try re-running.</p>
+          <p>Citation analysis was unavailable for this run - try re-running.</p>
         ) : (
           <p>No cited sources recorded in this run.</p>
         )}
@@ -300,7 +300,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     );
   }
 
-  // Drop dead links (404/410/5xx…) — "no broken links". Then apply the LLM
+  // Drop dead links (404/410/5xx…) - "no broken links". Then apply the LLM
   // filter (which LLM cited it). Categories/counts reflect the visible set.
   const liveEntries = entries.filter((e) => !isDeadLink(e));
   const deadCount = entries.length - liveEntries.length;
@@ -318,7 +318,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   const totalVisible = visibleEntries.length;
 
   // AEO lens: you can only "get listed" on third-party surfaces (roundups,
-  // directories, editorial, community). Vendor/competitor sites are landscape —
+  // directories, editorial, community). Vendor/competitor sites are landscape -
   // you can't add yourself to a rival's homepage. Split accordingly.
   const ACTIONABLE = new Set<CitationCategory>([
     "listicles",
@@ -330,7 +330,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
     "linkedin",
     "community",
   ]);
-  // A bare homepage citation ("ibm.com is cited") is low signal — you can't get
+  // A bare homepage citation ("ibm.com is cited") is low signal - you can't get
   // "listed" on a homepage, and it names no specific page to target. Drop these
   // from the worklist; the signal lives in cited DEEP pages (articles, directory
   // category pages, roundups).
@@ -346,10 +346,10 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   // Keep DEEP pages only; for listicles, also require niche relevance (drop the
   // vague off-topic roundups). Recount after filtering.
   // In-niche? The server LLM verdict wins for every content surface (incl.
-  // reviews — techradar hosts off-niche reviews/news). Keyword fallback only for
+  // reviews - techradar hosts off-niche reviews/news). Keyword fallback only for
   // listicles on pre-classifier audits.
   const nicheOk = (g: (typeof groups)[number], e: CitationAnalysisEntry): boolean => {
-    // A rival's single-product review/profile page is never get-listable —
+    // A rival's single-product review/profile page is never get-listable -
     // deterministic guard, independent of the LLM verdict.
     if (isSingleProductPage(e.resolved_url || e.url)) return false;
     if (typeof e.niche_relevant === "boolean") return e.niche_relevant;
@@ -437,7 +437,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
   const ownGradeColor =
     ownScore >= 60 ? "var(--pos)" : ownScore >= 25 ? "var(--warn)" : "var(--hot)";
 
-  // Landscape rolled up by DOMAIN — hundreds of vendor/competitor homepage rows
+  // Landscape rolled up by DOMAIN - hundreds of vendor/competitor homepage rows
   // are noise; the useful view is "which rival/vendor domains do the LLMs cite,
   // and how often". One row per domain.
   const landscapeDomains = (() => {
@@ -534,7 +534,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
               <b style={{ color: "var(--ink)" }}>{polledLlms.length} LLMs</b>{" "}
               collectively cited{" "}
               <b style={{ color: "var(--ink)" }}>{totalVisible}</b> source
-              {totalVisible === 1 ? "" : "s"} — you appear on{" "}
+              {totalVisible === 1 ? "" : "s"} - you appear on{" "}
               <b style={{ color: present.length > 0 ? "var(--pos)" : "var(--hot)" }}>
                 {present.length}
               </b>{" "}
@@ -554,7 +554,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
                 {llmFilter === "all" ? "ChatGPT" : LLM_LABEL[llmFilter]}
               </b>{" "}
               cited <b style={{ color: "var(--ink)" }}>{totalVisible}</b>{" "}
-              source{totalVisible === 1 ? "" : "s"} — you appear on{" "}
+              source{totalVisible === 1 ? "" : "s"} - you appear on{" "}
               <b style={{ color: present.length > 0 ? "var(--pos)" : "var(--hot)" }}>
                 {present.length}
               </b>{" "}
@@ -570,13 +570,13 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         <p style={{ fontSize: 12.5, color: "var(--ink-3)", marginTop: 6 }}>
           Two things that matter for AEO: <b>where to get listed</b> (third-party
           surfaces you're missing) and <b>your own-site signal</b>. Vendor &
-          competitor sites are landscape — you can't list yourself there.
+          competitor sites are landscape - you can't list yourself there.
           {deadCount > 0 && (
             <span> {deadCount} dead link{deadCount === 1 ? "" : "s"} hidden.</span>
           )}
         </p>
 
-        {/* Own-site signal — the strongest AEO proof is your own pages being cited. */}
+        {/* Own-site signal - the strongest AEO proof is your own pages being cited. */}
         <div
           style={{
             marginTop: 14,
@@ -617,7 +617,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         </div>
       </div>
 
-      {/* View toggle — all sources grouped, or filtered to one LLM's citations. */}
+      {/* View toggle - all sources grouped, or filtered to one LLM's citations. */}
       {polledLlms.length > 1 && (
         <div
           style={{
@@ -662,13 +662,13 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
       <div className="tm-phead" style={{ borderTop: "none" }}>
         <h2 style={{ color: "var(--hot)", display: "flex", alignItems: "center", gap: 6 }}>
           ⚑ Where to get listed
-          <InfoTip text="Third-party pages the LLMs cite that don't mention you yet, ranked by cross-LLM leverage (cited by all 3 = 'universal', shown first). We include only get-listable surfaces — roundups, reviews/directories, editorial, forums — and exclude homepages, single-product profile pages, off-niche sources, and dead links. The 'why list here' line is a gpt-4o-mini judgment that also names competitors already on the page." />
+          <InfoTip text="Third-party pages the LLMs cite that don't mention you yet, ranked by cross-LLM leverage (cited by all 3 = 'universal', shown first). We include only get-listable surfaces - roundups, reviews/directories, editorial, forums - and exclude homepages, single-product profile pages, off-niche sources, and dead links. The 'why list here' line is a gpt-4o-mini judgment that also names competitors already on the page." />
         </h2>
         <span className="meta">
           {actionableMissing} third-party page{actionableMissing === 1 ? "" : "s"} you're
           missing
           {universalCount > 0
-            ? ` · ${universalCount} cited by all ${polledLlms.length} LLMs — land these first`
+            ? ` · ${universalCount} cited by all ${polledLlms.length} LLMs - land these first`
             : " · highest-leverage first"}
           {homepagesHidden > 0 && ` · ${homepagesHidden} homepage${
             homepagesHidden === 1 ? "" : "s"
@@ -726,7 +726,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
             </h2>
             <span className="meta">
               {landscapeDomains.length} vendor & competitor domain
-              {landscapeDomains.length === 1 ? "" : "s"} — intel, not get-listable
+              {landscapeDomains.length === 1 ? "" : "s"} - intel, not get-listable
             </span>
           </button>
           {landscapeOpen && (
@@ -765,7 +765,7 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
                           : { background: "var(--panel-2)", color: "var(--ink-3)" }
                       }
                     >
-                      {d.present ? "You appear" : "—"}
+                      {d.present ? "You appear" : "-"}
                     </span>
                   </div>
                 </div>

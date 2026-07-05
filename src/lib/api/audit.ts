@@ -70,7 +70,7 @@ export const startAudit = createServerFn({ method: 'POST' })
   });
 
 /**
- * GET /api/audit/status — poll progress while audit runs
+ * GET /api/audit/status - poll progress while audit runs
  */
 export const getAuditStatus = createServerFn({ method: 'GET' })
   .inputValidator((data: { id: string }) => {
@@ -95,7 +95,7 @@ export const getAuditStatus = createServerFn({ method: 'GET' })
   });
 
 /**
- * GET /api/audit/result — fetch audit + all poll_results for display
+ * GET /api/audit/result - fetch audit + all poll_results for display
  */
 export const getAuditResult = createServerFn({ method: 'GET' })
   .inputValidator((data: { id: string }) => {
@@ -126,7 +126,7 @@ export const getAuditResult = createServerFn({ method: 'GET' })
   });
 
 /**
- * GET /api/audits/recent — list last 10 audits for dashboard
+ * GET /api/audits/recent - list last 10 audits for dashboard
  */
 export const listRecentAudits = createServerFn({ method: 'GET' }).handler(
   async () => {

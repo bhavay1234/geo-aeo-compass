@@ -12,7 +12,7 @@ import {
 import type { Audit, PollResult, DecisiveFactor } from "@/lib/db/types";
 
 export const Route = createFileRoute("/competitors")({
-  head: () => ({ meta: [{ title: "Competitors — Compass" }] }),
+  head: () => ({ meta: [{ title: "Competitors - Compass" }] }),
   component: CompetitorsPage,
 });
 
@@ -123,7 +123,7 @@ function ProfileCard({
         {p.discovered && (
           <span
             className="tm-tier tm-t2"
-            title="Surfaced by an LLM, not on your tracked list — re-run with it named to track it"
+            title="Surfaced by an LLM, not on your tracked list - re-run with it named to track it"
           >
             Discovered
           </span>
@@ -138,8 +138,8 @@ function ProfileCard({
             }
             title={
               p.category_tier === "direct"
-                ? "Direct rival — same category, overlapping features"
-                : "Adjacent — a neighboring category buyers cross-shop"
+                ? "Direct rival - same category, overlapping features"
+                : "Adjacent - a neighboring category buyers cross-shop"
             }
           >
             {p.category_tier === "direct" ? "Direct" : "Adjacent"}
@@ -188,13 +188,13 @@ function ProfileCard({
         />
       </div>
 
-      {/* Why it's named — audit-wide influence roll-up */}
+      {/* Why it's named - audit-wide influence roll-up */}
       {rollup && (
         <div className="tm-insight" style={{ marginTop: 14, padding: 0 }}>
           <div className="k">⚑ Why it's named</div>
           <p>
             {p.name} is named in <b>{rollup.queriesNamed}/{rollup.totalQueries}</b>{" "}
-            queries — driven mainly by <b>{DECISIVE_LABEL[rollup.dominant]}</b>
+            queries - driven mainly by <b>{DECISIVE_LABEL[rollup.dominant]}</b>
             {rollup.topSources.length > 0 && (
               <> ({rollup.topSources.slice(0, 3).join(", ")})</>
             )}
@@ -203,8 +203,8 @@ function ProfileCard({
         </div>
       )}
 
-      {/* Verdict — the headline unit. Hidden entirely when unavailable
-          (e.g. running without an OpenAI key) — an empty panel reads as
+      {/* Verdict - the headline unit. Hidden entirely when unavailable
+          (e.g. running without an OpenAI key) - an empty panel reads as
           broken, a permanent "scoring…" reads as stuck. */}
       {p.verdict && (
         <div style={{ marginTop: 14 }}>

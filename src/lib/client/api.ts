@@ -26,7 +26,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
       const body = (await res.json()) as { error?: string };
       if (body?.error) message = body.error;
     } catch {
-      // non-JSON error body — keep the status message
+      // non-JSON error body - keep the status message
     }
     throw new Error(message);
   }
@@ -53,7 +53,7 @@ export interface DnaResponse {
   query_source: 'labs' | 'llm';
 }
 
-/** Scrape + DNA + auto-picked queries. Slow (~30-70s) — callers show progress. */
+/** Scrape + DNA + auto-picked queries. Slow (~30-70s) - callers show progress. */
 export function analyzeDna(payload: DnaPayload): Promise<DnaResponse> {
   return request<DnaResponse>('/api/dna', {
     method: 'POST',

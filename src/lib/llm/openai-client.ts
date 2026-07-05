@@ -92,7 +92,7 @@ function computeAnchorText(
  *   message.annotations: Array<{ type:'url_citation',
  *     url_citation:{ url, title, start_index, end_index } }>
  * Dedupes by url; derives domain (hostname, lowercased, www stripped).
- * Never throws — skips any citation that fails to parse.
+ * Never throws - skips any citation that fails to parse.
  */
 function extractCitations(annotations: unknown): RawCitation[] {
   if (!Array.isArray(annotations)) return [];
@@ -111,7 +111,7 @@ function extractCitations(annotations: unknown): RawCitation[] {
       const domain = new URL(url).hostname.toLowerCase().replace(/^www\./, '');
       out.push({ url, title: a.url_citation?.title || '', domain, grounded: true });
     } catch {
-      // malformed citation — skip, never throw
+      // malformed citation - skip, never throw
     }
   }
   return out;
@@ -120,7 +120,7 @@ function extractCitations(annotations: unknown): RawCitation[] {
 /**
  * Faithful inline citation trail: ordered, un-deduped, one entry per
  * annotation, each with the sentence it anchors to. Additive to
- * extractCitations() — this is the "why the source is in the answer" view.
+ * extractCitations() - this is the "why the source is in the answer" view.
  */
 function extractRawCitations(
   text: string,
@@ -163,7 +163,7 @@ function extractRawCitations(
         grounded: true,
       });
     } catch {
-      // malformed citation — skip, never throw
+      // malformed citation - skip, never throw
     }
   }
   return out;
@@ -177,7 +177,7 @@ const WEBSEARCH_MODEL = 'gpt-5.5';
 
 /**
  * Polls ChatGPT with a buyer-intent query. PRIMARY path: OpenAI Responses API
- * with the web_search tool on a full model (WEBSEARCH_MODEL) — grounded,
+ * with the web_search tool on a full model (WEBSEARCH_MODEL) - grounded,
  * specific answers with real url_citation annotations. Falls back to the legacy
  * gpt-4o-search-preview chat model if the Responses call errors or comes back
  * empty (e.g. model not enabled on the account), so ChatGPT never goes dark.
@@ -198,15 +198,15 @@ export async function pollChatGPT(
   try {
     const r = await pollChatGPTWebSearch(query, env);
     if (r.response_text || r.citations.length > 0) return r;
-    console.error('[openai] web_search empty — falling back to search-preview');
+    console.error('[openai] web_search empty - falling back to search-preview');
   } catch (err: any) {
-    console.error('[openai] web_search failed — falling back:', err?.message);
+    console.error('[openai] web_search failed - falling back:', err?.message);
   }
   return pollChatGPTSearchPreview(query, env);
 }
 
 /**
- * PRIMARY ChatGPT path — OpenAI Responses API with the web_search tool. A full
+ * PRIMARY ChatGPT path - OpenAI Responses API with the web_search tool. A full
  * model decides its own searches, reads results, and cites specific pages via
  * url_citation annotations (grounded). Answer text prefers the assembled
  * message content, then the SDK's output_text convenience getter.
@@ -232,7 +232,7 @@ async function pollChatGPTWebSearch(
             'Answer the buyer question by SEARCHING THE WEB and citing specific, ' +
             'current third-party sources (comparison articles, review sites, ' +
             'industry rankings). Name concrete products/vendors. Be specific and ' +
-            'grounded — never generic.',
+            'grounded - never generic.',
           input: query,
         });
         const timeout = new Promise<never>((_, reject) => {
@@ -308,7 +308,7 @@ function extractResponses(response: any): {
   return { text, citations, raw_citations };
 }
 
-/** LEGACY fallback — gpt-4o-search-preview chat completion (built-in search). */
+/** LEGACY fallback - gpt-4o-search-preview chat completion (built-in search). */
 async function pollChatGPTSearchPreview(
   query: string,
   env: Env

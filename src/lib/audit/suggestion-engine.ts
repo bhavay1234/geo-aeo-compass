@@ -11,7 +11,7 @@ function unique(values: string[]): string[] {
 }
 
 /**
- * Deterministic, per-query recommendation. Zero OpenAI calls — derived
+ * Deterministic, per-query recommendation. Zero OpenAI calls - derived
  * entirely from the brand citation result + classified citations of a
  * single poll_result. The decision table is evaluated top to bottom;
  * first match wins. Action strings interpolate real domains/positions so
@@ -42,7 +42,7 @@ export function buildSuggestion(input: {
     return {
       situation: 'winning',
       severity: 'low',
-      action: `You own ${q} (position ${brand_position}). Protect it — monitor for competitor displacement and keep the cited page fresh.`,
+      action: `You own ${q} (position ${brand_position}). Protect it - monitor for competitor displacement and keep the cited page fresh.`,
       evidence: `Cited at position ${brand_position}.`,
     };
   }
@@ -68,7 +68,7 @@ export function buildSuggestion(input: {
     return {
       situation: 'losing_to_competitor',
       severity: 'high',
-      action: `Invisible on ${q} — ${domains.length} competitor${domains.length === 1 ? '' : 's'} cited (${domains[0]}${more}) and you are not. Build a dedicated page targeting this query and pursue presence on the cited source.`,
+      action: `Invisible on ${q} - ${domains.length} competitor${domains.length === 1 ? '' : 's'} cited (${domains[0]}${more}) and you are not. Build a dedicated page targeting this query and pursue presence on the cited source.`,
       evidence: `Competitor cited through ${domains.join(', ')}.`,
     };
   }
@@ -82,7 +82,7 @@ export function buildSuggestion(input: {
     return {
       situation: 'losing_to_competitor',
       severity: 'high',
-      action: `ChatGPT sources ${q} from ${domains[0]} where you're absent. Get listed/optimized on this review or analyst source — it's a direct citation path into the AI answer.`,
+      action: `ChatGPT sources ${q} from ${domains[0]} where you're absent. Get listed/optimized on this review or analyst source - it's a direct citation path into the AI answer.`,
       evidence: `Answer sourced from ${domains.join(', ')} without you.`,
     };
   }
@@ -93,16 +93,16 @@ export function buildSuggestion(input: {
     return {
       situation: 'open_opportunity',
       severity: 'medium',
-      action: `For ${q}, ChatGPT cites ${domains.slice(0, 2).join(', ')} but no clear category leader. Publish an authoritative, well-structured page targeting this exact query to claim the citation — open territory.`,
+      action: `For ${q}, ChatGPT cites ${domains.slice(0, 2).join(', ')} but no clear category leader. Publish an authoritative, well-structured page targeting this exact query to claim the citation - open territory.`,
       evidence: `Sources cited but no dominant brand: ${domains.join(', ')}.`,
     };
   }
 
-  // F. No live citations — model answered from training memory.
+  // F. No live citations - model answered from training memory.
   return {
     situation: 'authority_gap',
     severity: 'low',
-    action: `ChatGPT answered ${q} from training with no live sources. Build sustained brand-authority content the model ingests over time — lower immediate priority.`,
-    evidence: `No live citations — model answered from memory.`,
+    action: `ChatGPT answered ${q} from training with no live sources. Build sustained brand-authority content the model ingests over time - lower immediate priority.`,
+    evidence: `No live citations - model answered from memory.`,
   };
 }

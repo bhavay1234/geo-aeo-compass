@@ -35,7 +35,7 @@ const LLM_SHORT: Record<LlmSource, string> = {
 };
 
 export const Route = createFileRoute("/queries")({
-  head: () => ({ meta: [{ title: "Queries — Compass" }] }),
+  head: () => ({ meta: [{ title: "Queries - Compass" }] }),
   component: QueriesPage,
 });
 
@@ -47,7 +47,7 @@ const DECISIVE_LABEL: Record<DecisiveFactor, string> = {
 
 
 /** One competitor's influence, in plain language: why the LLM recommends it and
- *  where it's cited — no jargon, no normalized bars. */
+ *  where it's cited - no jargon, no normalized bars. */
 function InfluenceBlock({ w, llmName }: { w: WhyNamed; llmName: string }) {
   return (
     <div
@@ -190,7 +190,7 @@ function renderInline(text: string, terms: HlTerm[], kb: string): ReactNode[] {
  * Render the verbatim answer with light formatting: strips inline citation
  * markers ("[1]", "[3][4]"), renders **bold** and bullet/numbered lists, and
  * highlights the brand (--you) and competitors (--neg). LLM answers are
- * markdown — showing it raw made the panel look broken.
+ * markdown - showing it raw made the panel look broken.
  */
 function renderRichAnswer(text: string, brand: string, compNames: string[]): ReactNode {
   const terms = buildTerms(brand, compNames);
@@ -240,7 +240,7 @@ interface QueryGroup {
   polls: Map<LlmSource, PollResult>;
 }
 
-/** Honest methodology note — pre-empts the "but I see a different answer in the
+/** Honest methodology note - pre-empts the "but I see a different answer in the
  *  chat UI" objection by framing the report as an AGGREGATE, API-based
  *  measurement (many queries) vs a single volatile UI sample. */
 function MethodologyNote({ queryCount }: { queryCount: number }) {
@@ -273,7 +273,7 @@ function MethodologyNote({ queryCount }: { queryCount: number }) {
         }}
       >
         {open ? "▾" : "▸"} Measured via official APIs, aggregated across{" "}
-        {queryCount} {queryCount === 1 ? "query" : "queries"} — a one-off chat-UI
+        {queryCount} {queryCount === 1 ? "query" : "queries"} - a one-off chat-UI
         check may differ (that's expected)
       </button>
       {open && (
@@ -281,27 +281,27 @@ function MethodologyNote({ queryCount }: { queryCount: number }) {
           We query ChatGPT (OpenAI), Perplexity, and Gemini through their{" "}
           <strong>official APIs</strong>, running <strong>{queryCount}</strong>{" "}
           buyer {queryCount === 1 ? "query" : "queries"} in a{" "}
-          <strong>cold, no-login session</strong> and aggregating the results —
+          <strong>cold, no-login session</strong> and aggregating the results -
           what a <strong>fresh buyer</strong> sees, not a personalized account.
           <br />
           <br />
           If you check the same question in the chat app and see a different
           answer, that's <strong>expected</strong>, not a discrepancy in this
           report. AI answers are <strong>non-deterministic and personalized</strong>{" "}
-          — they shift by account memory, session, region, A/B tests, and time. A
+          - they shift by account memory, session, region, A/B tests, and time. A
           single UI answer is one <em>volatile sample</em>.
           <br />
           <br />
           This report deliberately measures the <strong>pattern across many
           queries</strong> (how often you're cited, and where the models source
-          their answers) — which is the reliable signal, not any one screenshot.
+          their answers) - which is the reliable signal, not any one screenshot.
         </div>
       )}
     </div>
   );
 }
 
-/** Free "try it yourself" link — opens ChatGPT with the prompt prefilled. This
+/** Free "try it yourself" link - opens ChatGPT with the prompt prefilled. This
  *  runs LIVE in the viewer's own (personalized) session, so it is NOT proof of
  *  the audit; the cold-session answer + sources shown here are the record. Same
  *  deep-link DFS's scraper returns as check_url, constructed for free (no ~10x
@@ -314,7 +314,7 @@ function OpenInChatGPT({ query }: { query: string }) {
       target="_blank"
       rel="noopener noreferrer"
       className="mono"
-      title="Opens ChatGPT with this prompt — runs live in YOUR personalized account, so it may differ from this cold-session audit. Not proof."
+      title="Opens ChatGPT with this prompt - runs live in YOUR personalized account, so it may differ from this cold-session audit. Not proof."
       style={{ fontSize: 11, color: "var(--ink-3)", whiteSpace: "nowrap" }}
     >
       ↗ Try in ChatGPT (live)
@@ -334,7 +334,7 @@ function QueriesView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
       .filter(Boolean)
   );
 
-  // ONE row per query — each holds its per-LLM polls. State aggregates across
+  // ONE row per query - each holds its per-LLM polls. State aggregates across
   // the LLMs polled (held = cited-well everywhere, absent = cited nowhere).
   const groups: QueryGroup[] = Array.from(groupPollsByQuery(polls).entries()).map(
     ([query, group]) => {
@@ -445,7 +445,7 @@ function QueryRow({
   const shown = activeLlm && group.polls.has(activeLlm) ? activeLlm : available[0] ?? null;
   const poll = shown ? group.polls.get(shown)! : null;
 
-  // Aggregate header stats — union across the LLM rows for this query.
+  // Aggregate header stats - union across the LLM rows for this query.
   const recSet = new Map<string, boolean>(); // lower -> tracked
   const namedSet = new Set((audit.competitors ?? []).map((c) => c.toLowerCase()));
   const urlSet = new Set<string>();
@@ -514,7 +514,7 @@ function QueryRow({
                       }}
                     >
                       {LLM_SHORT[l]}
-                      {p ? (cited ? " ✓" : " ✗") : " —"}
+                      {p ? (cited ? " ✓" : " ✗") : " -"}
                     </span>
                   );
                 })}
@@ -529,7 +529,7 @@ function QueryRow({
               <PositionDots position={bestPos} /> #{bestPos}
             </>
           ) : (
-            <span style={{ color: "var(--ink-3)" }}>—</span>
+            <span style={{ color: "var(--ink-3)" }}>-</span>
           )}
         </div>
         <div
@@ -598,7 +598,7 @@ function QueryRow({
                         {p.brand_cited ? "✓" : "✗"}
                       </span>
                     ) : (
-                      <span style={{ marginLeft: 6 }}>—</span>
+                      <span style={{ marginLeft: 6 }}>-</span>
                     )}
                   </button>
                 );
@@ -624,7 +624,7 @@ function QueryRow({
   );
 }
 
-/** True when a URL points at a site's root ("/", or empty path) — a homepage,
+/** True when a URL points at a site's root ("/", or empty path) - a homepage,
  *  not a deep article/listicle/review page. Query string + hash ignored. */
 function isHomepageUrl(url: string): boolean {
   try {
@@ -636,16 +636,16 @@ function isHomepageUrl(url: string): boolean {
 }
 
 /**
- * True when a cited URL is a RECOMMENDATION self-cite — the model naming a
- * product and linking its own site — rather than a third-party source you could
+ * True when a cited URL is a RECOMMENDATION self-cite - the model naming a
+ * product and linking its own site - rather than a third-party source you could
  * get listed on. This is the root cause of "homepages coming as sources": when
  * ChatGPT answers WITHOUT web grounding, DFS returns no `annotations`, so we mine
  * the prose's markdown links, which are the recommended products' homepages.
  *
  * Uses the authoritative `grounded` flag when present. On legacy rows (flag
- * absent) it stays deliberately conservative — only a product/company HOMEPAGE
+ * absent) it stays deliberately conservative - only a product/company HOMEPAGE
  * is hidden; reviews, editorial, forums, and any deep third-party page always
- * survive — so we never nuke a real source we can't prove is ungrounded.
+ * survive - so we never nuke a real source we can't prove is ungrounded.
  */
 function isRecommendationSelfCite(c: Citation): boolean {
   if (c.grounded === true) return false; // real web-search source
@@ -676,7 +676,7 @@ function PollBody({
     poll.raw_citations && poll.raw_citations.length > 0
       ? [...poll.raw_citations].sort((a, b) => a.order - b.order)
       : citations.map((c, i) => ({ ...c, order: i, anchor_text: "" }));
-  // Dedup by URL — the same source (e.g. a product's homepage that heads several
+  // Dedup by URL - the same source (e.g. a product's homepage that heads several
   // recommendation blocks) can appear many times in the inline trail; showing it
   // once is the honest count.
   const seenUrl = new Set<string>();
@@ -686,7 +686,7 @@ function PollBody({
     return true;
   });
   // Split real third-party sources from recommendation self-cites (the model
-  // linking a product it recommends to its own homepage — not a source you can
+  // linking a product it recommends to its own homepage - not a source you can
   // get listed on).
   const ordered = orderedAll.filter(
     (c) => !isRecommendationSelfCite(c as Citation)
@@ -699,10 +699,10 @@ function PollBody({
       .map((r) => normalizeDomain(r.domain))
   );
 
-  // Two different presence signals — the source of the "I'm present, why
+  // Two different presence signals - the source of the "I'm present, why
   // suggestions?" confusion. namedInAnswer = the brand appears in the prose
   // (the tab ✓). ownCited = the brand's OWN site is in the cited sources rail.
-  // You can be named but not cited — the worklist is about getting CITED.
+  // You can be named but not cited - the worklist is about getting CITED.
   const namedInAnswer = poll.brand_cited;
   const ownCited = (poll.citations ?? []).some(
     (c) =>
@@ -718,7 +718,7 @@ function PollBody({
     (audit.citation_status == null && recentlyCompleted);
   const analysisFailed = audit.citation_status === "failed";
 
-  // BRANDS NAMED in the prose — the real competitor signal (≠ cited domains).
+  // BRANDS NAMED in the prose - the real competitor signal (≠ cited domains).
   const namedSet = new Set((audit.competitors ?? []).map((c) => c.toLowerCase()));
   const recommended = recommendedBrands(poll, audit.brand_name).map((name) => ({
     name,
@@ -749,7 +749,7 @@ function PollBody({
           )}
         </div>
 
-        {/* When the brand IS named but NOT cited in sources, say so — otherwise
+        {/* When the brand IS named but NOT cited in sources, say so - otherwise
             "and not you" contradicts the ✓ and confuses the reader. */}
         {namedInAnswer && !ownCited && (
           <div
@@ -763,7 +763,7 @@ function PollBody({
               lineHeight: 1.5,
             }}
           >
-            ✓ <b>{audit.brand_name} is named in this answer</b> — but your site
+            ✓ <b>{audit.brand_name} is named in this answer</b> - but your site
             isn't among the <b>cited sources</b> it's built from. The competitors
             below <em>are</em> cited in third-party pages, which is what makes them
             consistently recommended. Getting cited on those pages defends your
@@ -771,13 +771,13 @@ function PollBody({
           </div>
         )}
 
-        {/* Why the LLM NAMED these brands — led by which cited sources name them. */}
+        {/* Why the LLM NAMED these brands - led by which cited sources name them. */}
         {poll.why_cited && poll.why_cited.length > 0 ? (
           <div style={{ marginTop: 20 }}>
             <div className="lbl">
               {namedInAnswer
                 ? `Why ${llmName} recommends these competitors`
-                : `Why ${llmName} recommends these — and not you`}
+                : `Why ${llmName} recommends these - and not you`}
             </div>
             {poll.why_cited.map((w, i) => (
               <InfluenceBlock key={i} w={w} llmName={llmName} />
@@ -800,14 +800,14 @@ function PollBody({
         ) : null}
       </div>
       <div className="tm-srcs">
-        {/* Panel 1: the competitor signal — brands NAMED in the prose. */}
+        {/* Panel 1: the competitor signal - brands NAMED in the prose. */}
         <div
           className="lbl"
           style={{ color: namedInAnswer ? "var(--ink-2)" : "var(--hot)", display: "flex", alignItems: "center", gap: 6 }}
         >
           {namedInAnswer ? "Also recommended" : "Recommended instead of you"} ·{" "}
           {recommended.length}
-          <InfoTip text="Products this LLM NAMED as recommendations in its answer text (parsed from the prose, then verified to actually appear). These are the competitors a buyer sees for this query — the core visibility signal, separate from which URLs were cited." />
+          <InfoTip text="Products this LLM NAMED as recommendations in its answer text (parsed from the prose, then verified to actually appear). These are the competitors a buyer sees for this query - the core visibility signal, separate from which URLs were cited." />
         </div>
         {recommended.length === 0 ? (
           <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 18 }}>
@@ -826,7 +826,7 @@ function PollBody({
               <span
                 key={i}
                 className="tm-chip"
-                title={r.tracked ? "tracked competitor" : "discovered — not on your list"}
+                title={r.tracked ? "tracked competitor" : "discovered - not on your list"}
                 style={{
                   display: "inline-flex",
                   alignItems: "center",
@@ -847,13 +847,13 @@ function PollBody({
           </div>
         )}
 
-        {/* Panel 2: where this LLM sourced its answer — the "get listed" signal.
+        {/* Panel 2: where this LLM sourced its answer - the "get listed" signal.
             Only THIRD-PARTY sources count; recommendation homepages are excluded
             (they're the products above, not pages you can get listed on). */}
         <div className="lbl" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             Where {llmName} sourced this · {ordered.length}
-            <InfoTip text="The real third-party pages this LLM cited to build its answer (its grounded web sources). We resolve Gemini's redirect proxies to the true URL and drop recommendation homepages (a product's own site the model links while naming it — not a page you can get listed on). These are your get-listed targets." />
+            <InfoTip text="The real third-party pages this LLM cited to build its answer (its grounded web sources). We resolve Gemini's redirect proxies to the true URL and drop recommendation homepages (a product's own site the model links while naming it - not a page you can get listed on). These are your get-listed targets." />
           </span>
           {selfCiteCount > 0 && (
             <small style={{ fontWeight: 600, color: "var(--ink-3)" }}>
@@ -864,8 +864,8 @@ function PollBody({
         {ordered.length === 0 ? (
           <p style={{ fontSize: 12, color: "var(--ink-3)" }}>
             {selfCiteCount > 0
-              ? `No third-party sources — ${llmName} answered from model knowledge and only linked the recommended products' own sites (shown above). To surface here you need third-party coverage — listicles, reviews, editorial — not a homepage.`
-              : "No live sources — answered from training."}
+              ? `No third-party sources - ${llmName} answered from model knowledge and only linked the recommended products' own sites (shown above). To surface here you need third-party coverage - listicles, reviews, editorial - not a homepage.`
+              : "No live sources - answered from training."}
           </p>
         ) : (
           ordered.map((c, i) => {
@@ -876,7 +876,7 @@ function PollBody({
               competitorJudged
             );
             void ownNorm;
-            // Full cited URL — Gemini's vertexaisearch proxy has no deep path in
+            // Full cited URL - Gemini's vertexaisearch proxy has no deep path in
             // the raw poll citation, so show a clean domain-root for it.
             const fullUrl = c.url.includes("vertexaisearch.cloud.google.com")
               ? `https://${c.domain}/`

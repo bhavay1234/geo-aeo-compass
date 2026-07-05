@@ -39,7 +39,7 @@ export function generateQueries(
     { text: `affordable ${c} tools`, category: 'solution' },
   ];
 
-  // Comparison (3) — only added if we have competitors
+  // Comparison (3) - only added if we have competitors
   if (comp1) {
     queries.push({ text: `${brand} vs ${comp1}`, category: 'comparison' });
   }

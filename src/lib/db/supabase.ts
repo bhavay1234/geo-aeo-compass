@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 /**
- * Message body for the audit-jobs queue. One message per query — the
+ * Message body for the audit-jobs queue. One message per query - the
  * consumer fans out, polls ChatGPT, and writes a poll_results row.
  */
 export interface AuditQueueMessage {
@@ -19,7 +19,7 @@ export interface AuditQueueMessage {
 
 /**
  * Minimal shape of Cloudflare's Queue binding. We don't depend on
- * @cloudflare/workers-types — just the one method we call.
+ * @cloudflare/workers-types - just the one method we call.
  */
 export interface QueueBinding<T> {
   send(message: T, options?: { contentType?: string; delaySeconds?: number }): Promise<void>;
@@ -40,7 +40,7 @@ export type Env = {
   VITE_SUPABASE_ANON_KEY: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   OPENAI_API_KEY: string;
-  /** Apify API token — Worker secret + .dev.vars. Never log or expose. */
+  /** Apify API token - Worker secret + .dev.vars. Never log or expose. */
   APIFY_TOKEN: string;
   /** DataForSEO Basic-Auth credentials (login/password). Powers the Perplexity
    *  + Gemini pollers alongside our direct OpenAI ChatGPT path. */

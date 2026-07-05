@@ -10,7 +10,7 @@ const LLM_LABEL: Record<LlmSource, string> = {
 };
 
 export const Route = createFileRoute("/settings")({
-  head: () => ({ meta: [{ title: "Settings — Compass" }] }),
+  head: () => ({ meta: [{ title: "Settings - Compass" }] }),
   component: SettingsPage,
 });
 
@@ -99,7 +99,7 @@ function SettingsInner() {
       </div>
 
       <p style={{ padding: "14px 18px", fontSize: 11, color: "var(--ink-3)" }}>
-        Configuration is fixed per run — start a new audit from the launcher to
+        Configuration is fixed per run - start a new audit from the launcher to
         change brand, competitors, or queries.
       </p>
     </div>

@@ -67,7 +67,7 @@ export interface CrawledPage {
 }
 
 /**
- * Apify Website Content Crawler — limited same-domain crawl of the TARGET site
+ * Apify Website Content Crawler - limited same-domain crawl of the TARGET site
  * to discover whether a relevant page already exists for each query (Part 4).
  * cheerio crawler type keeps it cheap; capped at maxCrawlPages.
  */

@@ -11,15 +11,16 @@ import {
 import { useWorkspace } from "./workspace-context";
 import { useTheme } from "./useTheme";
 import { allCompetitorBrands, groupPollsByQuery, llmsPolled } from "./derive";
+import { Icon, type IconName } from "./primitives";
 import type { Audit } from "@/lib/db/types";
 
-const TABS = [
-  { key: "summary", label: "Overview", glyph: "◧", to: "/summary" as const },
-  { key: "queries", label: "Queries", glyph: "⌕", to: "/queries" as const },
-  { key: "citations", label: "Citations", glyph: "❖", to: "/citations" as const },
-  { key: "competitors", label: "Competitors", glyph: "⚇", to: "/competitors" as const },
-  { key: "actions", label: "Actionables", glyph: "⚡", to: "/actions" as const },
-  { key: "analytics", label: "Analytics", glyph: "▤", to: "/analytics" as const },
+const TABS: { key: string; label: string; icon: IconName; to: "/summary" | "/queries" | "/citations" | "/competitors" | "/actions" | "/analytics" }[] = [
+  { key: "summary", label: "Overview", icon: "overview", to: "/summary" },
+  { key: "queries", label: "Queries", icon: "queries", to: "/queries" },
+  { key: "citations", label: "Citations", icon: "citations", to: "/citations" },
+  { key: "competitors", label: "Competitors", icon: "competitors", to: "/competitors" },
+  { key: "actions", label: "Actionables", icon: "actions", to: "/actions" },
+  { key: "analytics", label: "Analytics", icon: "analytics", to: "/analytics" },
 ];
 
 const PAGE_TITLE: Record<string, string> = {
@@ -79,7 +80,7 @@ export function Sidebar() {
             <button className="tgt" aria-label="Select audit">
               <span className="l">Target</span>
               <span className="v">
-                {audit ? audit.brand_name : "—"}
+                {audit ? audit.brand_name : "-"}
                 {score != null && <span className="sc">{score}</span>}
               </span>
             </button>
@@ -120,8 +121,8 @@ export function Sidebar() {
               className={`tm-navitem ${on ? "on" : ""}`}
               aria-current={on ? "page" : undefined}
             >
-              <span className="gl" aria-hidden>
-                {t.glyph}
+              <span className="gl">
+                <Icon name={t.icon} size={18} />
               </span>
               {t.label}
               {ct ? <span className="ct">{ct}</span> : null}
@@ -132,10 +133,10 @@ export function Sidebar() {
 
       <div className="tm-side-foot">
         <Link to="/" className="tm-newaudit" aria-label="Start a new audit">
-          <span aria-hidden>+</span> New audit
+          <Icon name="plus" size={16} strokeWidth={2.4} /> New audit
         </Link>
         <button className="tm-toggle" onClick={toggle} aria-label="Toggle theme">
-          <span aria-hidden>{theme === "dark" ? "☾" : "☀"}</span>
+          <Icon name={theme === "dark" ? "moon" : "sun"} size={15} />
           <span className="tgl-lbl">{theme === "dark" ? "Dark" : "Light"} theme</span>
           <span className="tm-sw" />
         </button>

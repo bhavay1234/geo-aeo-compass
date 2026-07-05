@@ -1,12 +1,12 @@
 /**
- * Deterministic extraction of product/brand names from an LLM answer's PROSE —
+ * Deterministic extraction of product/brand names from an LLM answer's PROSE -
  * zero LLM calls. Used as the brands_named fallback when OPENAI_API_KEY is not
  * configured (the LLM extraction in generateQuerySuggestion is skipped).
  *
  * "Best X software" answers are heavily markdown-formatted; the recommended
  * products almost always appear as **bold spans** or ### headings. But generic
  * EDUCATIONAL answers ("what is integrated logistics IT?") bold CATEGORY terms
- * and section headings ("WMS (Warehouse Management System)", "Core idea") — we
+ * and section headings ("WMS (Warehouse Management System)", "Core idea") - we
  * must never mistake those for vendor brands. isBrandLike() is the gate.
  */
 
@@ -24,13 +24,13 @@ const GENERIC = new Set([
   'core idea', 'key components', 'how it works', 'in practice',
 ]);
 
-// Generic software-category acronyms — categories, never brands.
+// Generic software-category acronyms - categories, never brands.
 const CATEGORY_ACRONYM =
   /^(erp|wms|tms|oms|crm|scm|aps|esi|plm|hcm|hrm|ipaas|paas|saas|api|apis|ai|ml|rpa|iot|edi|b2b|b2c|kpi|kpis|roi|sku|3pl|4pl|ocr|nlp|llm|sdk|ui|ux)$/i;
 
 // Trailing generic descriptors that mark a CATEGORY or a BENEFIT/CAPABILITY
 // phrase, not a product name ("Operational efficiency", "Real-time insights",
-// "IoT sensors", "Customer satisfaction" — the LLM extractor leaks these).
+// "IoT sensors", "Customer satisfaction" - the LLM extractor leaks these).
 const CATEGORY_TAIL =
   /\b(system|systems|software|platform|platforms|solution|solutions|planning|management|middleware|tool|tools|suite|services|service|technologies|technology|ecosystems?|capabilities|analytics|integration|automation|infrastructure|frameworks?|modules?|tracking|visibility|optimization|intelligence|reporting|forecasting|orchestration|monitoring|procurement|fulfillment|dashboards?|efficiency|insights?|satisfaction|transparency|compliance|traceability|reduction|sensors?|sustainability|productivity|collaboration|resilience|accuracy|reliability|connectivity|scalability|learning|exchange|governance|execution|enablement|experience|engagement|performance|savings|security)$/i;
 
@@ -39,7 +39,7 @@ const HEADING_START =
   /^(how|why|what|when|where|which|key|core|advanced|example|examples|getting|benefit|benefits|overview|understanding|choosing|comparing|top|best|pros|cons|note|summary|conclusion|introduction|modern|typical|common|popular|leading|other|additional|main|basic|general)\b/i;
 
 /**
- * True only for strings that plausibly name a real product/vendor — short,
+ * True only for strings that plausibly name a real product/vendor - short,
  * capitalized, not a category acronym / descriptor / heading. Shared with the
  * UI so category junk from OLD audits is filtered at read time too.
  */
@@ -89,7 +89,7 @@ export function extractProseBrands(text: string, ownName: string): string[] {
     // Drop list numbering: "1. HubSpot CRM" → "HubSpot CRM".
     n = n.replace(/^\d{1,2}[.)]\s+/, '');
     // Drop trailing descriptions: "VYLO – AI dialer for teams" → "VYLO".
-    n = n.split(/\s+[–—-]\s+/)[0].split(/:\s/)[0].trim();
+    n = n.split(/\s+[-–]\s+/)[0].split(/:\s/)[0].trim();
     n = n.replace(/[.,;:!?]+$/, '').trim();
     const low = n.toLowerCase();
     // Exclude the audited brand AND its product variants ("HubSpot CRM").
@@ -98,12 +98,12 @@ export function extractProseBrands(text: string, ownName: string): string[] {
     if (!found.has(low)) found.set(low, n);
   };
 
-  // Markdown bold spans — the dominant "named product" pattern.
+  // Markdown bold spans - the dominant "named product" pattern.
   for (const m of text.matchAll(/\*\*([^*\n]{2,60})\*\*/g)) add(m[1]);
   // Markdown headings (## / ### / #### Product).
   for (const m of text.matchAll(/^#{2,4}\s+(.+)$/gm)) add(m[1]);
-  // Numbered list leads: "1. Product — description" / "2) Product: blurb".
-  for (const m of text.matchAll(/^\s*\d{1,2}[.)]\s+([A-Z][^\n–—:-]{1,50})(?=[\s–—:-]|$)/gm))
+  // Numbered list leads: "1. Product - description" / "2) Product: blurb".
+  for (const m of text.matchAll(/^\s*\d{1,2}[.)]\s+([A-Z][^\n:–-]{1,50})(?=[\s:–-]|$)/gm))
     add(m[1]);
 
   return Array.from(found.values()).slice(0, 10);

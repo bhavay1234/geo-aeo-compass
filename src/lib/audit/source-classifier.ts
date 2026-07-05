@@ -1,7 +1,7 @@
 import type { SourceType } from '../db/types';
 
 /**
- * Domain classification lists. THESE ARE THE LEVER the operator tunes —
+ * Domain classification lists. THESE ARE THE LEVER the operator tunes -
  * add domains here as you discover which sources ChatGPT pulls from in
  * your category. Everything not matched falls through to 'other'.
  */
@@ -45,7 +45,7 @@ export const COMPETITOR_DOMAIN_ALIASES: Record<string, string> = {
   shippeo: 'shippeo.com',
 };
 
-// PR / press-release wires — syndicated vendor announcements, not editorial.
+// PR / press-release wires - syndicated vendor announcements, not editorial.
 export const PR_DOMAINS = new Set<string>([
   'prnewswire.com',
   'businesswire.com',
@@ -98,7 +98,7 @@ export const UGC_DOMAINS = new Set<string>([
 ]);
 
 // Tech media that primarily REVIEW products (product reviews / "hands-on"),
-// distinct from vendor sites — e.g. techradar.com/reviews/motive-fleet-management.
+// distinct from vendor sites - e.g. techradar.com/reviews/motive-fleet-management.
 export const REVIEW_MEDIA_DOMAINS = new Set<string>([
   'techradar.com',
   'pcmag.com',
@@ -134,7 +134,7 @@ const LISTICLE_URL =
 const REVIEW_URL = /\/reviews?\//i;
 
 /**
- * A review-site page ABOUT ONE product (a competitor's profile / reviews page) —
+ * A review-site page ABOUT ONE product (a competitor's profile / reviews page) -
  * NOT a directory you can list yourself in. Deterministic URL patterns for the
  * major review sites: g2.com/products/x, capterra.com/p/…, softwareadvice.com/
  * cat/x-profile, getapp.com/cat/a/x, trustradius.com/products/x, etc. Category/
@@ -182,7 +182,7 @@ export function citationCategory(
   if (host('reddit.com')) return 'reddit';
   if (host('youtube.com') || d === 'youtu.be') return 'youtube';
   if (host('linkedin.com')) return 'linkedin';
-  // A rival's OWN website — kept separate from generic vendor/product sites.
+  // A rival's OWN website - kept separate from generic vendor/product sites.
   if (sourceType === 'competitor' || inDomainSet(d, competitorDomains)) return 'competitor';
   // Reviews & directories: software-review sites, analysts, review-media, and
   // any "/reviews/" section (techradar.com/reviews/...).
@@ -211,7 +211,7 @@ export function citationCategory(
   if (LISTICLE_URL.test(u)) return 'listicles';
   if (sourceType === 'editorial' || EDITORIAL_DOMAINS.has(d) || NEWS_DOMAINS.has(d))
     return 'editorial';
-  // Default in an AI buyer answer: a product/company (vendor) website — incl. the
+  // Default in an AI buyer answer: a product/company (vendor) website - incl. the
   // brand's own site (source_type 'own'). The dominant citation type.
   return 'vendor';
 }

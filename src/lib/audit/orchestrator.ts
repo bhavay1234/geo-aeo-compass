@@ -29,7 +29,7 @@ import type {
 } from '../db/types';
 
 const BATCH_SIZE = 3;
-/** Max brand-verdict LLM calls per enrich invocation — bounds subrequest fan-out. */
+/** Max brand-verdict LLM calls per enrich invocation - bounds subrequest fan-out. */
 const VERDICT_CAP = 8;
 
 /**
@@ -261,7 +261,7 @@ export async function computeSummary(
   } else if (visibilityRate >= 0.15) {
     headline = `${brandName} is cited in only ${cited} of ${total} AI answers to buyer queries. Major AEO gap.`;
   } else {
-    headline = `${brandName} is nearly invisible across AI answers — cited in just ${cited} of ${total}.`;
+    headline = `${brandName} is nearly invisible across AI answers - cited in just ${cited} of ${total}.`;
   }
 
   return {
@@ -426,13 +426,13 @@ function aggregateExternalDomains(
 }
 
 /**
- * FAST finalize — deterministic only, NO LLM calls. Wins a CAS claim
+ * FAST finalize - deterministic only, NO LLM calls. Wins a CAS claim
  * (running → finalizing), writes the rule-based summary/insights/discovered,
  * flips status to 'completed', and returns true. The UI renders as soon as
  * status is 'completed'; enrichAudit then upgrades tiers/positioning in place.
  *
  * The CAS (conditional update on status='running') ensures only ONE worker
- * finalizes — kills the double-finalize race.
+ * finalizes - kills the double-finalize race.
  */
 export async function finalizeAuditFast(
   auditId: string,
@@ -533,7 +533,7 @@ export async function finalizeAuditFast(
 }
 
 /**
- * ENRICH — the LLM step, run AFTER status is already 'completed'. Cost:
+ * ENRICH - the LLM step, run AFTER status is already 'completed'. Cost:
  *   - 1 gpt-4o-mini positioning-inference call
  *   - N gpt-4o-mini per-query suggestion calls, ALL fired in parallel
  *     (Promise.allSettled) each with a per-call timeout; a timed-out/failed
@@ -590,7 +590,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       .eq('audit_id', auditId);
     const polls = (pollData as FinalizePoll[]) || [];
 
-    // 1) Positioning + market category — ONE mini call.
+    // 1) Positioning + market category - ONE mini call.
     const { positioning, category } = await inferPositioning(
       {
         brandName,
@@ -601,7 +601,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       env
     );
 
-    // 2) Per-query suggestions — ALL fired in parallel; each call self-limits
+    // 2) Per-query suggestions - ALL fired in parallel; each call self-limits
     //    via its own timeout and returns null on failure (→ deterministic).
     const settled = await Promise.allSettled(
       polls.map((p) =>
@@ -686,7 +686,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       });
     }
 
-    // 5) Patch each poll in parallel (allSettled — one bad write can't hang it).
+    // 5) Patch each poll in parallel (allSettled - one bad write can't hang it).
     await Promise.allSettled(
       perQuery.map(async ({ poll, llm }) => {
         const citations = (poll.citations as Citation[]) || [];
@@ -767,7 +767,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       .map(([, nm]) => nm);
 
     // Judge which discovered brands are GENUINE same-category rivals by intent +
-    // features (not by mention count) — consolidates variants, drops off-category
+    // features (not by mention count) - consolidates variants, drops off-category
     // noise. This replaces the ">= 2 queries" recurrence gate applied downstream:
     // a real rival named once survives, a one-off BI tool doesn't. Empty on
     // OpenAI-off / failure, in which case the UI keeps its recurrence fallback.
@@ -782,7 +782,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
     );
 
     // Ground each competitor's domain in a REAL cited URL when the brand's own
-    // site was cited (portcast.io — NOT a portcast.com guess). Exact first-label
+    // site was cited (portcast.io - NOT a portcast.com guess). Exact first-label
     // match only, so a short name can't grab an unrelated domain. When nothing
     // is cited, the classifier's model-known domain (onebeat.co) stands.
     const citedDomains = new Set<string>();
@@ -805,7 +805,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
     // Deterministic consolidation: the LLM's variant-merge is inconsistent
     // run-to-run (e.g. it left "SAP Transportation Management" and "SAP
     // Integrated Business Planning" as two cards). Now that every entry carries
-    // a REAL domain, collapse any that resolved to the SAME domain into one —
+    // a REAL domain, collapse any that resolved to the SAME domain into one -
     // parent name = shared leading words, strongest tier (direct > adjacent).
     // Entries with no domain can't be safely merged and pass through as-is.
     const byDomain = new Map<
@@ -838,9 +838,9 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
     // 6) Recompute insights/summary with the corrected competitor count, then
     //    persist in THREE staged writes so a missing/unmigrated column can't
     //    cascade-drop the others (the cause of empty competitors/verdicts):
-    //      a. core data — columns present since 0002/0004
-    //      b. positioning + category markers — 0006 / base schema
-    //      c. verdicts — 0008
+    //      a. core data - columns present since 0002/0004
+    //      b. positioning + category markers - 0006 / base schema
+    //      c. verdicts - 0008
     //    Verdicts are also the slowest (N mini-calls), so writing the core
     //    first means competitor data lands even if verdicts are slow or fail.
     const insights = await computeInsights(auditId, env);
@@ -859,7 +859,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       .update({ positioning: positioning ?? '', category: category || null })
       .eq('id', auditId);
 
-    // CITATIONS ENQUEUE — fire BEFORE the verdict fan-out (fix C). positioning +
+    // CITATIONS ENQUEUE - fire BEFORE the verdict fan-out (fix C). positioning +
     // brands_named + citation_roles are now written (all the analysis needs), and
     // the queue.send still has subrequest budget (the verdict calls below can
     // exhaust it). The citations stage runs in its OWN invocation with a fresh
@@ -895,7 +895,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       await supabase.from('audits').update({ citation_status: 'failed' }).eq('id', auditId);
     }
 
-    // Brand verdicts — "what is X?" for the user's brand + each profiled
+    // Brand verdicts - "what is X?" for the user's brand + each profiled
     // competitor (named + discovered). Fired in parallel; failures fall back ''.
     const verdictTargets: Array<{ name: string; domain: string | null; isYou: boolean }> = [
       { name: brandName, domain: brandDomain, isYou: true },
@@ -917,7 +917,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       seenV.add(k);
       return true;
     });
-    // Cap verdict fan-out (fix A) — the brand always, then the most-mentioned
+    // Cap verdict fan-out (fix A) - the brand always, then the most-mentioned
     // competitors, up to VERDICT_CAP total. Bounds subrequests per invocation.
     const mentionCount = new Map<string, number>();
     for (const { llm } of perQuery)
@@ -951,7 +951,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
     ).length;
     if (emptyVerdicts > 0) {
       console.error(
-        `[verdict] ${emptyVerdicts}/${capped.length} verdicts empty for ${auditId} — ` +
+        `[verdict] ${emptyVerdicts}/${capped.length} verdicts empty for ${auditId} - ` +
           `see [verdict] failed lines for cause (likely subrequest/connection limit)`
       );
     }
@@ -973,7 +973,7 @@ export async function enrichAudit(auditId: string, env: Env): Promise<void> {
       .eq('id', auditId);
 
     console.log(
-      `[finalize:enrich] audit ${auditId} — ${competitorsList.length} competitors, ` +
+      `[finalize:enrich] audit ${auditId} - ${competitorsList.length} competitors, ` +
         `${polls.length} suggestion calls + 1 positioning call`
     );
   } catch (err: any) {
@@ -996,19 +996,19 @@ export function buildInsightHeadline(
   const y = summary.total_queries;
   const discovered = insights.discovered_competitor_count;
 
-  // Discovered (unnamed) competitors are the most compelling finding —
+  // Discovered (unnamed) competitors are the most compelling finding -
   // lead with them when present. Counts are per AI ANSWER (query × LLM).
   if (discovered > 0) {
     const brands = discovered === 1 ? 'brand' : 'brands';
     const verb = discovered === 1 ? 'is' : 'are';
-    return `Cited in only ${x} of ${y} AI answers — and ${discovered} ${brands} you didn't name ${verb} winning these answers.`;
+    return `Cited in only ${x} of ${y} AI answers - and ${discovered} ${brands} you didn't name ${verb} winning these answers.`;
   }
 
   const losing = insights.situation_distribution.losing_to_competitor;
   const open = insights.situation_distribution.open_opportunity;
 
   if (summary.visibility_rate >= 0.7) {
-    return `Cited in ${x} of ${y} AI answers — strong AEO position, with ${open} open opportunities to extend.`;
+    return `Cited in ${x} of ${y} AI answers - strong AEO position, with ${open} open opportunities to extend.`;
   }
-  return `Cited in only ${x} of ${y} AI answers — losing ${losing} to competitors, with ${open} open opportunities.`;
+  return `Cited in only ${x} of ${y} AI answers - losing ${losing} to competitors, with ${open} open opportunities.`;
 }

@@ -60,7 +60,7 @@ function ProgressPanel({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
         </div>
         <p style={{ marginTop: 12, fontSize: 11, color: "var(--ink-3)" }}>
           Updates live. Each query is polled against ChatGPT, Perplexity and
-          Gemini with web search — results render the moment the run completes.
+          Gemini with web search - results render the moment the run completes.
         </p>
       </div>
     </div>
@@ -72,7 +72,7 @@ export function PartialBanner() {
     <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--grid)" }}>
       <div className="tm-warn-banner">
         <span aria-hidden>⚑</span>
-        Scoring is taking longer than expected — showing partial results from
+        Scoring is taking longer than expected - showing partial results from
         the queries completed so far.
       </div>
     </div>

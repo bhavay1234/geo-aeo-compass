@@ -48,7 +48,7 @@ export interface Citation {
   source_type: SourceType;
   /** True when the URL came from the LLM's real web-search sources
    *  (DFS `annotations` / OpenAI url_citations). False when it was mined from
-   *  inline markdown links in an UNGROUNDED answer — i.e. the model listed a
+   *  inline markdown links in an UNGROUNDED answer - i.e. the model listed a
    *  recommended product and linked its own homepage, not a third-party source.
    *  Absent on legacy rows (predates the flag). */
   grounded?: boolean;
@@ -93,7 +93,7 @@ export type DiscoveredLabel = 'competitor' | 'aggregator' | 'editorial' | 'other
 /** Classifier's confidence in a discovered-domain label. */
 export type Confidence = 'high' | 'medium' | 'low';
 
-/** An unnamed brand/domain ChatGPT repeatedly cites — a competitor the user may not know about. */
+/** An unnamed brand/domain ChatGPT repeatedly cites - a competitor the user may not know about. */
 export interface DiscoveredCompetitor {
   domain: string;
   citation_count: number;
@@ -124,7 +124,7 @@ export interface CitationRole {
   role: 'competitor' | 'source' | 'unsure';
 }
 
-/** "How ChatGPT describes [brand]" — one-line verdict from a 'what is X?' poll. */
+/** "How ChatGPT describes [brand]" - one-line verdict from a 'what is X?' poll. */
 export interface BrandVerdict {
   name: string;
   domain: string | null;
@@ -147,7 +147,7 @@ export interface PageSignals {
   has_canonical: boolean;
   page_type: PageType;
   analyzed_via: "fetch" | "apify";
-  /** Final URL after redirects (captured from the fetch) — the REAL destination
+  /** Final URL after redirects (captured from the fetch) - the REAL destination
    *  for Gemini vertexaisearch grounding proxies, with the deep path intact.
    *  In-memory only (not cached); absent on cache hits and the apify path. */
   final_url?: string;
@@ -158,22 +158,22 @@ export interface CitationAnalysisEntry {
   url: string;
   domain: string;
   source_type: SourceType;
-  /** Distinct QUERY texts (not polls) citing this URL — the buyer-facing count. */
+  /** Distinct QUERY texts (not polls) citing this URL - the buyer-facing count. */
   query_count: number;
-  /** Which LLMs cited this URL across the audit — the multi-LLM leverage
+  /** Which LLMs cited this URL across the audit - the multi-LLM leverage
    *  signal. A source cited by all 3 is a "universal source" (get-listed
    *  priority). Legacy single-LLM entries default to ["chatgpt"]. */
   llms_citing: LlmSource[];
   brand_present: boolean;
   match_type: "name" | "domain" | "none";
-  /** HTTP status of the cited URL (after following redirects). >=400 = dead —
+  /** HTTP status of the cited URL (after following redirects). >=400 = dead -
    *  filtered from the UI. Absent on audits run before status-checking shipped. */
   status_code?: number;
-  /** Final URL after redirects — the real destination for Gemini's
+  /** Final URL after redirects - the real destination for Gemini's
    *  vertexaisearch grounding-redirect proxies. Absent = use `url`. */
   resolved_url?: string;
   /** For roundup/listicle sources: did an LLM judge this list to be in the
-   *  brand's actual niche (vs merely sharing a word — "trade finance" / stock
+   *  brand's actual niche (vs merely sharing a word - "trade finance" / stock
    *  "trading" for a supply-chain brand)? Absent = not judged (kept). */
   niche_relevant?: boolean;
   /** One-line LLM reason WHY getting this brand listed here would help its AI
@@ -181,7 +181,7 @@ export interface CitationAnalysisEntry {
   get_listed_reason?: string;
   /** Can the brand REALISTICALLY be listed here? True only for multi-vendor
    *  roundups / comparisons / directories / multi-tool discussions that already
-   *  name ≥2 competitors — where adding the brand is natural. FALSE for pages
+   *  name ≥2 competitors - where adding the brand is natural. FALSE for pages
    *  centered on ONE brand (single-product review/profile, single-company news,
    *  a press release, an opinion piece that ranks no products). Absent = not
    *  judged (kept, for legacy audits). */
@@ -214,7 +214,7 @@ export interface PageRef {
 }
 
 /**
- * Why ChatGPT NAMED brand X as a recommendation in one query — led by which
+ * Why ChatGPT NAMED brand X as a recommendation in one query - led by which
  * cited sources name it (Factor 1), then cross-audit third-party presence
  * (Factor 2), then own-site signals (Factor 3, least). Verdict is one cheap
  * LLM call over the factor summary (deterministic fallback on failure).
@@ -230,7 +230,7 @@ export interface WhyNamed {
   verdict: string;
 }
 
-/** The TARGET brand's influence on the SAME query — powers "why not you" + the
+/** The TARGET brand's influence on the SAME query - powers "why not you" + the
  *  YOU comparison bars. Stored in poll_results.own_page (jsonb). */
 export interface YouInfluence {
   factors: InfluenceFactors;
@@ -256,10 +256,10 @@ export interface AuditInsights {
   discovered_competitor_count: number;
   // Discovered rivals judged genuine same-category competitors by intent +
   // features (OpenAI), consolidated to parent brand. Replaces the blunt
-  // recurrence gate — a real rival named in ONE query still surfaces, while
+  // recurrence gate - a real rival named in ONE query still surfaces, while
   // wrong-category noise (BI tools, carriers) is dropped. Absent on old audits.
   competitor_brands?: ClassifiedCompetitor[];
-  /** Per-brand sentiment of HOW each brand is described across the answers —
+  /** Per-brand sentiment of HOW each brand is described across the answers -
    *  0–100 (higher = more positive). Keyed by lowercased brand name. Absent on
    *  audits run before sentiment analysis shipped. */
   sentiment?: Record<string, { score: number; label: 'positive' | 'neutral' | 'negative' }>;
@@ -272,7 +272,7 @@ export interface ClassifiedCompetitor {
   name: string;
   tier: 'direct' | 'adjacent';
   /** Official website domain, grounded in cited URLs where possible, else the
-   *  model's best knowledge ("onebeat.co", "portcast.io") — NOT a name+".com"
+   *  model's best knowledge ("onebeat.co", "portcast.io") - NOT a name+".com"
    *  guess. Absent when unresolved (caller falls back to the guess). */
   domain?: string;
 }
@@ -310,7 +310,7 @@ export interface Audit {
   completed_at: string | null;
   citation_analysis: CitationAnalysisEntry[];
   citation_status: "analyzing" | "done" | "failed" | null;
-  /** Which LLMs this audit polled — the denominator for cross-LLM signals
+  /** Which LLMs this audit polled - the denominator for cross-LLM signals
    *  (consensus per brand, universal citation sources). */
   llms_polled: LlmSource[];
   /** Brand DNA captured at launch (Apify scrape → LLM synthesis): category,
@@ -347,7 +347,7 @@ export interface PollResult {
   discovered_in_query: DiscoveredInQuery[];
   citation_roles: CitationRole[];
   /** Brands/products ChatGPT NAMED in the prose as answers/recommendations
-   *  (LLM-extracted, excl. the audited brand). The competitor signal — distinct
+   *  (LLM-extracted, excl. the audited brand). The competitor signal - distinct
    *  from cited source domains. */
   brands_named: string[];
   /** Per named-brand "why named" influence analysis (Factor 1-3 + verdict). */

@@ -70,7 +70,7 @@ function isUsableTitleSegment(seg: string): boolean {
  */
 export function deriveBrandName(title: string, domain: string): string {
   if (normalizeDomain(domain)) return domainToBrand(domain);
-  const seg = (title || "").split(/[|\-:–—]/)[0].trim();
+  const seg = (title || "").split(/[|\-:–-]/)[0].trim();
   return isUsableTitleSegment(seg) ? seg : domain || "Unknown";
 }
 
@@ -100,7 +100,7 @@ export function categorizeCitedBrands(
     brands.push({ key, name, domain, tier });
   };
 
-  // Tier 1 — named competitors that were cited.
+  // Tier 1 - named competitors that were cited.
   for (const c of competitorsCited) {
     const nm = (c.name || "").trim();
     if (!nm) continue;
@@ -156,7 +156,7 @@ export function CitedBrands({
   );
 
   if (brands.length === 0) {
-    return <span className="text-muted-foreground">—</span>;
+    return <span className="text-muted-foreground">-</span>;
   }
 
   const visible = expanded ? brands : brands.slice(0, MAX_PILLS);

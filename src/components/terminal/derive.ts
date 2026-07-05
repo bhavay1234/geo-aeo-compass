@@ -41,7 +41,7 @@ export interface GetListedTarget {
 }
 
 /**
- * The off-page worklist — third-party pages the LLMs cite that the brand is
+ * The off-page worklist - third-party pages the LLMs cite that the brand is
  * MISSING from, ranked by cross-LLM leverage (cited by more models = higher
  * payoff to land). This is the core "where to get listed" answer, shared by the
  * Summary rollup and the Citations tab. Excludes homepages, single-product
@@ -97,12 +97,12 @@ export interface CitationCategoryGroup {
   missing: number;
 }
 
-/** Domains of the audited brand's REAL rivals — the tracked competitors plus
+/** Domains of the audited brand's REAL rivals - the tracked competitors plus
  *  the intent+feature classified competitor_brands (real domains). Deliberately
  *  EXCLUDES discovered_competitors: that's a loose per-citation "competitor"
  *  label (100s of domains) that would flood the Competitors bucket with every
  *  vendor/listicle the LLM happened to tag. Lets cited rival sites bucket into
- *  "Competitors" instead of the generic "Vendor" pile — accurately. */
+ *  "Competitors" instead of the generic "Vendor" pile - accurately. */
 export function competitorDomainSet(audit: Audit): Set<string> {
   const s = new Set<string>();
   for (const c of audit.competitors ?? []) {
@@ -222,7 +222,7 @@ export function tagSource(
 /**
  * Same-industry competitor domains cited in ONE answer, decided by the
  * per-query LLM role judgment (citation_roles) plus the discovered_in_query
- * competitor label — NOT a static vendor-domain guess. Returns normalized
+ * competitor label - NOT a static vendor-domain guess. Returns normalized
  * domains.
  */
 export function competitorDomainsInPoll(p: PollResult): Set<string> {
@@ -243,7 +243,7 @@ export function competitorDomainsInPoll(p: PollResult): Set<string> {
 /**
  * Competitor brands ChatGPT NAMED in ONE answer's prose (excl. the audited
  * brand). The real competitor signal: union of tracked-list prose matches
- * (competitors_cited) + the LLM-extracted brands_named. NOT cited domains —
+ * (competitors_cited) + the LLM-extracted brands_named. NOT cited domains -
  * those are sources, tagged separately via tagSource.
  */
 /** Brand-name match tolerant of product variants: "Oracle" ~ "Oracle
@@ -311,7 +311,7 @@ export function recommendedBrands(p: PollResult, ownName: string): string[] {
     out.push(nm);
   };
   for (const c of p.competitors_cited ?? []) add(c.name);
-  // brands_named must actually appear in the answer — the LLM occasionally
+  // brands_named must actually appear in the answer - the LLM occasionally
   // invents rivals on educational answers ("recommended instead of you" with
   // brands never in the text). Verify against the prose before counting them.
   for (const b of p.brands_named ?? [])
@@ -319,7 +319,7 @@ export function recommendedBrands(p: PollResult, ownName: string): string[] {
   return out;
 }
 
-/** Competitor brands recommended in a query (excl. own) — the gap-row signal. */
+/** Competitor brands recommended in a query (excl. own) - the gap-row signal. */
 export function whoCited(p: PollResult, ownName: string): string[] {
   return recommendedBrands(p, ownName);
 }
@@ -333,7 +333,7 @@ export interface InfluenceRollup {
 }
 
 /** Audit-wide influence summary for one competitor brand (Competitors tab).
- *  Counts DISTINCT QUERIES (not polls) — a multi-LLM audit has N polls per
+ *  Counts DISTINCT QUERIES (not polls) - a multi-LLM audit has N polls per
  *  query, and "named in 6/8 queries" must not inflate to 18/24. */
 export function influenceRollup(
   polls: PollResult[],
@@ -384,7 +384,7 @@ export function influenceRollup(
  *  (recurrence) to count, so a single-mention long-tail doesn't inflate it. */
 export function allCompetitorBrands(audit: Audit, polls: PollResult[]): string[] {
   // Preferred: the intent+feature classification (tracked competitors + the
-  // classified rivals, already consolidated) — no recurrence gate, so real
+  // classified rivals, already consolidated) - no recurrence gate, so real
   // one-mention rivals are kept and wrong-category noise is already dropped.
   const classified = audit.insights?.competitor_brands ?? [];
   if (classified.length > 0) {
@@ -398,7 +398,7 @@ export function allCompetitorBrands(audit: Audit, polls: PollResult[]): string[]
       }
     }
     // Collapse product variants ("Descartes MacroPoint" → "Descartes") the LLM
-    // classifier may have missed — never list the same competitor twice.
+    // classifier may have missed - never list the same competitor twice.
     return dedupeBrandVariants(out);
   }
   // Fallback (OpenAI-off / pre-classifier audits): recurrence >= 2 distinct
@@ -447,7 +447,7 @@ export interface GapRow {
 
 const STATE_WEIGHT: Record<QueryState, number> = { absent: 3, weak: 2, held: 1 };
 
-/** Group poll_results by unique query_text — one entry per query, all LLM rows. */
+/** Group poll_results by unique query_text - one entry per query, all LLM rows. */
 export function groupPollsByQuery(polls: PollResult[]): Map<string, PollResult[]> {
   const out = new Map<string, PollResult[]>();
   for (const p of polls) {
@@ -613,7 +613,7 @@ export interface TypeSlice {
 }
 
 /**
- * Domain usage + source-type breakdown from the citation analysis — mirrors the
+ * Domain usage + source-type breakdown from the citation analysis - mirrors the
  * "Domains" table and "Domains by Type" ring on a tracking dashboard.
  */
 export function buildDomainStats(
@@ -659,9 +659,9 @@ export function buildDomainStats(
 }
 
 /**
- * Share of RECOMMENDATIONS across queries — the share a buyer understands:
+ * Share of RECOMMENDATIONS across queries - the share a buyer understands:
  * "of all the products the LLMs collectively name, how often is it you vs each
- * competitor?" One count per (brand, query) — named in any LLM = one point, so
+ * competitor?" One count per (brand, query) - named in any LLM = one point, so
  * being named in all 3 LLMs for one query doesn't triple-count. Cross-LLM
  * aggregate; use `computeShareOfVoiceByLlm` for per-LLM comparison.
  */
@@ -710,13 +710,13 @@ export function computeShareOfVoice(audit: Audit, polls: PollResult[]): SovEntry
     .sort((a, b) => b.count - a.count);
 }
 
-/** Per-LLM Share of Recommendations — one SoV list per LLM (for the demo
+/** Per-LLM Share of Recommendations - one SoV list per LLM (for the demo
  *  "who's nastier: ChatGPT or Perplexity" comparison bars). */
 export interface LlmScorecard {
   llm: LlmSource;
   /** Answers actually captured from this LLM (rows). */
   answers: number;
-  /** Queries polled — answers may be lower if some polls failed. */
+  /** Queries polled - answers may be lower if some polls failed. */
   expected: number;
   /** Answers where the brand is NAMED in the answer text ("prompt presence"). */
   namedIn: number;
@@ -729,7 +729,7 @@ export interface LlmScorecard {
 }
 
 /**
- * One scorecard per polled LLM — the "don't merge the LLMs" view. Visibility,
+ * One scorecard per polled LLM - the "don't merge the LLMs" view. Visibility,
  * prompt-presence (named in the answer) vs citation-presence (your domain in
  * the sources rail), and per-LLM share of recommendations, each computed over
  * ONLY that LLM's answers.
@@ -781,7 +781,7 @@ export interface BrandConsensus {
   byLlm: Record<LlmSource, number>;
 }
 
-/** Cross-LLM consensus for a single brand — powers the "named by N/M LLMs"
+/** Cross-LLM consensus for a single brand - powers the "named by N/M LLMs"
  *  chip on Summary + Competitors. Excludes the audited brand automatically. */
 export function brandConsensus(
   audit: Audit,
@@ -867,7 +867,7 @@ function pollRecommends(
 }
 
 /**
- * Full competitor profiles for the Competitors tab — the user's brand pinned
+ * Full competitor profiles for the Competitors tab - the user's brand pinned
  * first, then competitors by share of voice. All derived from poll_results +
  * the batched verdicts; nothing fabricated.
  */
@@ -895,7 +895,7 @@ export function buildCompetitorProfiles(
   }
 
   // Discovered competitor BRANDS. Preferred: the intent+feature classification
-  // (audit.insights.competitor_brands) — genuine same-category rivals judged by
+  // (audit.insights.competitor_brands) - genuine same-category rivals judged by
   // what they ARE, consolidated to parent brand, wrong-category noise already
   // dropped; a real rival named in ONE query still surfaces. Fallback for
   // OpenAI-off / pre-classifier audits: recurrence >= 2 distinct queries.

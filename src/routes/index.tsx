@@ -9,7 +9,7 @@ import type { AuditStatus } from "@/lib/db/types";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Compass — AEO terminal" },
+      { title: "Compass - AEO terminal" },
       {
         name: "description",
         content: "Track how often ChatGPT, Perplexity and Gemini cite your brand for buyer queries.",
@@ -200,7 +200,7 @@ function Index() {
 
               {dnaMutation.isPending && (
                 <p className="mono" style={{ marginTop: 10, fontSize: 11, color: "var(--ink-3)" }}>
-                  ◴ Reading {domain} — scraping the site, building Brand DNA, and
+                  ◴ Reading {domain} - scraping the site, building Brand DNA, and
                   picking the top queries by search volume… (~1 min)
                 </p>
               )}
@@ -214,7 +214,7 @@ function Index() {
                 <div style={{ marginTop: 12, borderTop: "1px solid var(--grid)", paddingTop: 12 }}>
                   <div className="tm-label">Brand DNA</div>
                   <p className="nar" style={{ fontSize: 14, lineHeight: 1.5, color: "var(--ink)" }}>
-                    {dna.positioning || "—"}
+                    {dna.positioning || "-"}
                   </p>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
                     {dna.category && <span className="tm-chip">{dna.category}</span>}
@@ -244,8 +244,8 @@ function Index() {
                   )}
                   <p className="mono" style={{ marginTop: 8, fontSize: 10.5, color: "var(--ink-3)" }}>
                     {querySource === "labs"
-                      ? "Queries ranked by real monthly search volume — review/edit below, then run."
-                      : "Queries generated from the Brand DNA — review/edit below, then run."}
+                      ? "Queries ranked by real monthly search volume - review/edit below, then run."
+                      : "Queries generated from the Brand DNA - review/edit below, then run."}
                   </p>
                 </div>
               )}

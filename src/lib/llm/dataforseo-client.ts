@@ -10,9 +10,9 @@ import type {
  * same shape as our direct-OpenAI `OpenAIPollResult` so downstream extraction /
  * classification / brands_named / why-cited runs unchanged regardless of source.
  *
- * We keep the direct OpenAI ChatGPT poller (proven working) alongside DFS — DFS
+ * We keep the direct OpenAI ChatGPT poller (proven working) alongside DFS - DFS
  * only adds the two other LLMs. If DFS response field names differ from what
- * this normalizer expects, extend `pickAnswerText` / `pickReferences` — every
+ * this normalizer expects, extend `pickAnswerText` / `pickReferences` - every
  * fallback is defensive.
  */
 
@@ -47,7 +47,7 @@ async function callDFS(
       signal: controller.signal,
     });
     if (!res.ok) {
-      // Never include auth in the message — path + status only.
+      // Never include auth in the message - path + status only.
       throw new Error(`DFS ${path} ${res.status}`);
     }
     return await res.json();
@@ -58,7 +58,7 @@ async function callDFS(
 
 /**
  * ChatGPT via DataForSEO. Uses the LLM SCRAPER (llm_scraper/live/advanced),
- * NOT llm_responses — the scraper returns ChatGPT's real Sources panel (the
+ * NOT llm_responses - the scraper returns ChatGPT's real Sources panel (the
  * dozens of third-party links the chatgpt.com UI shows: listicles, review
  * sites, market-research, editorials), whereas llm_responses only returns the
  * model's sparse inline citations (typically a handful of recommended vendors'
@@ -111,8 +111,8 @@ export async function pollChatGPTviaDFS(
 
 /**
  * Normalize a chat_gpt/llm_scraper/live/advanced response. The scraper exposes
- * `sources` — one `chat_gpt_source` per link in ChatGPT's Sources panel, each
- * with a real deep URL + title + publication_date — which we treat as the
+ * `sources` - one `chat_gpt_source` per link in ChatGPT's Sources panel, each
+ * with a real deep URL + title + publication_date - which we treat as the
  * grounded citation set. `markdown` holds the full answer text.
  */
 function normalizeScraper(raw: unknown): OpenAIPollResult {
@@ -210,7 +210,7 @@ export async function pollGemini(
 
 /**
  * Gemini grounding wraps EVERY source in a vertexaisearch redirect proxy, so the
- * raw poll citations have no real deep URL — the Queries tab could only show a
+ * raw poll citations have no real deep URL - the Queries tab could only show a
  * domain homepage. Resolve the proxies HERE (at poll time) by following the
  * redirect Location (manual, no body), so citations carry the real publisher
  * URL everywhere. Bounded + best-effort: failures keep the proxy URL (the
@@ -275,7 +275,7 @@ async function resolveVertexRedirect(url: string): Promise<string | null> {
 }
 
 /**
- * Generic DFS LLM call (no web search) that must return JSON — powers Brand
+ * Generic DFS LLM call (no web search) that must return JSON - powers Brand
  * DNA synthesis without an OpenAI key. Returns the parsed object or null.
  */
 export async function dfsLlmJson(
@@ -289,7 +289,7 @@ export async function dfsLlmJson(
       [
         {
           // DFS rejects user_prompt/system_message over ~500 chars
-          // ("Invalid Field") — hard-slice as a safety net; prompts are
+          // ("Invalid Field") - hard-slice as a safety net; prompts are
           // designed to fit.
           user_prompt: userPrompt.slice(0, 490),
           model_name: 'gpt-4o',
@@ -308,7 +308,7 @@ export async function dfsLlmJson(
       .replace(/\s*```$/i, '')
       .trim();
     if (!text) return null;
-    // Model sometimes wraps JSON in prose — grab the outermost object.
+    // Model sometimes wraps JSON in prose - grab the outermost object.
     const start = text.indexOf('{');
     const end = text.lastIndexOf('}');
     if (start === -1 || end <= start) {
@@ -423,7 +423,7 @@ function extractFromItems(items: AnyObj[]): { text: string; refs: AnyObj[] } {
 
 /**
  * ChatGPT-via-DFS embeds its web citations as inline markdown links in the
- * answer text — "([forbes.com](https://forbes.com/...?utm_source=openai))" —
+ * answer text - "([forbes.com](https://forbes.com/...?utm_source=openai))" -
  * with EMPTY structured annotations (verified live). When no annotations came
  * back, mine the text for markdown links so the citation rail isn't empty.
  */
@@ -431,7 +431,7 @@ function refsFromMarkdown(text: string): AnyObj[] {
   const out: AnyObj[] = [];
   const seen = new Set<string>();
   for (const m of text.matchAll(/\[([^\]\n]{1,120})\]\((https?:\/\/[^\s)]+)\)/g)) {
-    // Skip markdown images ![alt](url) — they're assets, not citations.
+    // Skip markdown images ![alt](url) - they're assets, not citations.
     if (m.index !== undefined && m.index > 0 && text[m.index - 1] === '!') continue;
     const url = m[2];
     if (seen.has(url)) continue;
@@ -456,7 +456,7 @@ function normalize(
   const extracted = extractFromItems(items);
   const response_text = extracted.text;
   // Real web-search sources arrive as structured `annotations` (extracted.refs).
-  // When that array is empty the model answered WITHOUT grounding — so any links
+  // When that array is empty the model answered WITHOUT grounding - so any links
   // in the prose are recommended products' own homepages, not third-party
   // sources. We still surface them (mined from markdown) but flag them
   // `grounded: false` so the UI can present them as recommendations, not "where

@@ -16,7 +16,7 @@ import { getEnv } from '../server/runtime';
  *
  * Audit execution: /api/audit/start inserts the audit row, enqueues one
  * message per user-supplied query to AUDIT_QUEUE, and returns. The queue()
- * handler in src/server.ts consumes batches in parallel — each query gets
+ * handler in src/server.ts consumes batches in parallel - each query gets
  * its own fresh CPU budget, so the free-tier waitUntil kill (Phase 3.13)
  * no longer applies. Query count is dynamic (no upper limit).
  */
@@ -71,7 +71,7 @@ export async function handleApiRoute(request: Request): Promise<Response> {
       ];
 
       // Insert audit row already in 'running' state. progress_total counts
-      // queries × LLMs — the consumer increments per (query, llm) poll.
+      // queries × LLMs - the consumer increments per (query, llm) poll.
       const { data: audit, error } = await supabase
         .from('audits')
         .insert({
@@ -93,7 +93,7 @@ export async function handleApiRoute(request: Request): Promise<Response> {
 
       const auditId = audit.id as string;
 
-      // brand_dna persisted in an ISOLATED best-effort write — if migration
+      // brand_dna persisted in an ISOLATED best-effort write - if migration
       // 0012 hasn't been applied yet, audit creation must not break (the
       // llms_polled lesson). Failure only loses the DNA display, not the run.
       if (body.brand_dna) {
@@ -104,7 +104,7 @@ export async function handleApiRoute(request: Request): Promise<Response> {
         if (dnaErr) console.error('[api] brand_dna write failed (non-fatal):', dnaErr.message);
       }
 
-      // Fan out to the queue — one message per (query × llm). Marked
+      // Fan out to the queue - one message per (query × llm). Marked
       // query_category 'user' since these aren't from the generated bank.
       try {
         await Promise.all(
@@ -158,7 +158,7 @@ export async function handleApiRoute(request: Request): Promise<Response> {
     // Re-run ONLY the citation-analysis stage for an existing audit (no
     // re-polling). Recovers an audit whose citation stage was killed mid-run
     // (hung on 'analyzing'), and lets the operator refresh categorization/status
-    // after a logic change. Idempotent — analyzeCitations overwrites its outputs.
+    // after a logic change. Idempotent - analyzeCitations overwrites its outputs.
     if (path === '/api/audit/recite' && method === 'POST') {
       const body = (await request.json().catch(() => ({}))) as { audit_id?: string };
       const auditId = body.audit_id?.trim();
@@ -212,7 +212,7 @@ export async function handleApiRoute(request: Request): Promise<Response> {
 
     // Brand DNA: scrape the site (Apify), synthesize DNA + pick the 20 most
     // relevant queries (DataForSEO Labs), honoring the caller's intent mode.
-    // Synchronous — the launcher shows an analyzing state (~30-70s).
+    // Synchronous - the launcher shows an analyzing state (~30-70s).
     if (path === '/api/dna' && method === 'POST') {
       const body = (await request.json().catch(() => ({}))) as {
         domain?: string;

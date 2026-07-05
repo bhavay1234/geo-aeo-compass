@@ -16,7 +16,7 @@ import { updateNotes } from "@/lib/client/api";
 import type { Audit, PollResult, Suggestion } from "@/lib/db/types";
 
 export const Route = createFileRoute("/actions")({
-  head: () => ({ meta: [{ title: "Actionables — Compass" }] }),
+  head: () => ({ meta: [{ title: "Actionables - Compass" }] }),
   component: ActionsPage,
 });
 
@@ -97,7 +97,7 @@ function refineAction(
   if (decisive === "own_site") {
     return anyOwnPageExists
       ? {
-          title: `Upgrade your page for “${query}” — competitors win on a dedicated, schema-rich page.`,
+          title: `Upgrade your page for “${query}” - competitors win on a dedicated, schema-rich page.`,
           effort: 3,
         }
       : { title: `Build a dedicated page targeting “${query}”.`, effort: 4 };
@@ -115,7 +115,7 @@ function refineAction(
   const more = domains.length > 3 ? ` +${domains.length - 3} more` : "";
   const effort = Math.min(5, Math.max(2, Math.ceil(domains.length / 1.5)));
   return {
-    title: `Get listed where ${srcNoun} sourced this — ${list}${more} name competitors but not you.`,
+    title: `Get listed where ${srcNoun} sourced this - ${list}${more} name competitors but not you.`,
     effort,
   };
 }
@@ -196,7 +196,7 @@ function ActionsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
       <div className="tm-rows">
         {actions.length === 0 ? (
           <div className="tm-empty">
-            No actionable gaps — you're cited across these queries.
+            No actionable gaps - you're cited across these queries.
           </div>
         ) : (
           actions.map((a, i) => (
@@ -333,7 +333,7 @@ function NotesEditor({
           setNotes(e.target.value);
           setSaved(false);
         }}
-        placeholder="Your close after reviewing the gaps — saved to this audit."
+        placeholder="Your close after reviewing the gaps - saved to this audit."
       />
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
         <button

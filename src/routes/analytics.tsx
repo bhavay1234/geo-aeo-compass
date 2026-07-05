@@ -4,7 +4,7 @@ import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
 import type { Audit, SuggestionSituation } from "@/lib/db/types";
 
 export const Route = createFileRoute("/analytics")({
-  head: () => ({ meta: [{ title: "Analytics — Compass" }] }),
+  head: () => ({ meta: [{ title: "Analytics - Compass" }] }),
   component: AnalyticsPage,
 });
 
@@ -366,14 +366,14 @@ function AnalyticsView({ audit, pollsCount }: { audit: Audit; pollsCount: number
                   {current.score}
                   <small>/100</small>
                 </div>
-                <div className="tm-chg mono flat">— single run</div>
+                <div className="tm-chg mono flat">- single run</div>
               </div>
             </div>
             <div className="tm-insight" style={{ paddingLeft: 0, paddingRight: 0 }}>
               <div className="k">⚑ Need a baseline</div>
               <p>
                 Trends chart movement across runs of the same brand. Only{" "}
-                <b>one completed run</b> exists for {audit.brand_name} — run the
+                <b>one completed run</b> exists for {audit.brand_name} - run the
                 same brand + domain again to plot the index, coverage, and
                 blind-spot trajectory.
               </p>
@@ -382,7 +382,7 @@ function AnalyticsView({ audit, pollsCount }: { audit: Audit; pollsCount: number
         )}
       </div>
 
-      {/* Coverage over runs — per ANSWER (one answer per query per LLM). */}
+      {/* Coverage over runs - per ANSWER (one answer per query per LLM). */}
       <div className="tm-panel tm-reveal" style={{ animationDelay: ".05s" }}>
         <div className="tm-phead">
           <h2>◫ Coverage · cited vs blind answers</h2>

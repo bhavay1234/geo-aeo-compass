@@ -7,7 +7,7 @@ import { handleApiRoute } from "./lib/api/handler";
 import { processQueueBatch } from "./lib/audit/queue-consumer";
 import type { Env, AuditQueueMessage } from "./lib/db/supabase";
 
-// Minimal shape of Cloudflare's MessageBatch — only the bits we use.
+// Minimal shape of Cloudflare's MessageBatch - only the bits we use.
 type MessageBatchLike<T> = {
   messages: Array<{ body: T }>;
   ackAll: () => void;
@@ -62,7 +62,7 @@ function isCatastrophicSsrErrorBody(body: string, responseStatus: number): boole
 }
 
 // h3 swallows in-handler throws into a normal 500 Response with body
-// {"unhandled":true,"message":"HTTPError"} — try/catch alone never fires for those.
+// {"unhandled":true,"message":"HTTPError"} - try/catch alone never fires for those.
 async function normalizeCatastrophicSsrResponse(response: Response): Promise<Response> {
   if (response.status < 500) return response;
   const contentType = response.headers.get("content-type") ?? "";
@@ -79,10 +79,10 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
-    // PHASE 3.10 DIAGNOSTIC — remove after env binding confirmed working
+    // PHASE 3.10 DIAGNOSTIC - remove after env binding confirmed working
     console.log("[server.ts] env keys:", Object.keys((env as object) || {}));
     try {
-      // Plain-JSON API routes — dispatched before TanStack Start so they
+      // Plain-JSON API routes - dispatched before TanStack Start so they
       // bypass the Seroval-encoded createServerFn RPC protocol. Usable from
       // any HTTP client. See src/lib/api/handler.ts.
       const url = new URL(request.url);
@@ -107,7 +107,7 @@ export default {
     }
   },
 
-  // Cloudflare Queues consumer — invoked once per batch from audit-jobs.
+  // Cloudflare Queues consumer - invoked once per batch from audit-jobs.
   // wrappped in runWithRuntime so getEnv() in downstream code works the same
   // way as it does in fetch handlers.
   async queue(

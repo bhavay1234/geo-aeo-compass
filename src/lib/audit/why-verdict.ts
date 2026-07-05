@@ -40,7 +40,7 @@ export interface InfluenceSide {
 /**
  * Deterministic fallback verdict (used only if the cheap LLM call fails). Leads
  * with the citation evidence, names the decisive factor, then "why not you".
- * "Likely/primarily" framing — correlated with citation, not proof of ranking.
+ * "Likely/primarily" framing - correlated with citation, not proof of ranking.
  */
 export function buildInfluenceFallback(args: {
   brand: string;
@@ -64,13 +64,13 @@ export function buildInfluenceFallback(args: {
 
   let not: string;
   if (me.named_in_sources.length === 0) {
-    not = ` ${you} wasn't named — it appears in 0 of the ${x.cited_total} cited sources for this query`;
+    not = ` ${you} wasn't named - it appears in 0 of the ${x.cited_total} cited sources for this query`;
     not += x.named_in_sources.length
       ? `, and is absent from the ${sourceList(x.named_in_sources)} pages ChatGPT pulled from.`
       : '.';
     not += ' Closest gap: get listed in the review/listicle sources driving this answer.';
   } else {
-    not = ` ${you} appears in ${me.named_in_sources.length} of the cited sources but still wasn't named as a top pick — strengthen presence in the highest-authority ones.`;
+    not = ` ${you} appears in ${me.named_in_sources.length} of the cited sources but still wasn't named as a top pick - strengthen presence in the highest-authority ones.`;
   }
 
   return lead + not;

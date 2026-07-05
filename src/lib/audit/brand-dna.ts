@@ -10,7 +10,7 @@ import { selectBuyerQueries } from '../llm/suggestions';
 import { normalizeDomain } from './source-classifier';
 
 /**
- * Brand DNA — what the website actually is, distilled from a live scrape.
+ * Brand DNA - what the website actually is, distilled from a live scrape.
  * Everything downstream (auto-picked queries, positioning display) hangs off
  * this. Generated with Apify (scrape) + DataForSEO (LLM synthesis + Labs
  * keyword data); no OpenAI dependency.
@@ -38,7 +38,7 @@ export interface DnaQueryPick {
 export interface DnaResult {
   dna: BrandDna;
   queries: DnaQueryPick[];
-  /** How the queries were sourced — 'labs' (DFS volume data) or 'llm' fallback. */
+  /** How the queries were sourced - 'labs' (DFS volume data) or 'llm' fallback. */
   query_source: 'labs' | 'llm';
 }
 
@@ -53,7 +53,7 @@ const DNA_SYSTEM =
   'phrase,"seed_phrases":string[] exactly 5 ' +
   'generic buyer search phrases for this category, never the brand name}';
 
-/** Scrape the homepage — Apify cheerio primary (per config), plain fetch fallback. */
+/** Scrape the homepage - Apify cheerio primary (per config), plain fetch fallback. */
 async function scrapeHomepage(domain: string, env: Env): Promise<ExtractedPage | null> {
   const url = `https://${normalizeDomain(domain)}/`;
   if (env.APIFY_TOKEN) {
@@ -67,7 +67,7 @@ async function scrapeHomepage(domain: string, env: Env): Promise<ExtractedPage |
   return await fetchPageSignals(url);
 }
 
-/** Word-set signature — kills keyword permutation spam ("crm software" vs "software crm"). */
+/** Word-set signature - kills keyword permutation spam ("crm software" vs "software crm"). */
 function wordSig(kw: string): string {
   return kw
     .toLowerCase()
@@ -90,11 +90,11 @@ const TRANSACTIONAL_INTENTS = new Set(['transactional', 'commercial']);
 
 // Keywords that mark job-seeker / support / navigational noise the Labs
 // suggestions sometimes carry (live example: "hsbc global trade solutions
-// internship") — never buyer queries.
+// internship") - never buyer queries.
 const JUNK_WORDS =
   /\b(internship|intern|jobs?|careers?|salary|salaries|hiring|login|log in|sign ?in|sign ?up|support|help ?desk|tutorial|course|certification|resume|cv|acquires?|acquisition|merger|edition|textbook|book|pdf|syllabus|meaning|definition|gmbh|co kg|pvt ltd|wikipedia)\b/i;
 
-// Local-business lookups: "... pembroke pines fl", "... new castle pa" — a
+// Local-business lookups: "... pembroke pines fl", "... new castle pa" - a
 // trailing US state code marks a geo/local query, never a category buyer query.
 const GEO_TAIL =
   /\s(al|ak|az|ar|ca|co|ct|de|fl|ga|hi|ia|id|il|ks|ky|la|ma|md|mi|mn|mo|ms|mt|nc|nd|ne|nh|nj|nm|nv|ny|oh|ok|pa|ri|sc|sd|tn|tx|ut|va|vt|wa|wi|wv|wy)\s*$/i;
@@ -109,7 +109,7 @@ const CONTEXT_NOISE =
  * 20 variants of one phrase.
  */
 /** Filter (junk/geo/intent/own-brand) + dedupe permutations by word-signature,
- *  volume-desc. Returns the clean candidate pool WITHOUT a diversity cap —
+ *  volume-desc. Returns the clean candidate pool WITHOUT a diversity cap -
  *  callers add diversity (heuristic or LLM). */
 export function rankCandidates(
   suggestions: KeywordSuggestion[],
@@ -118,7 +118,7 @@ export function rankCandidates(
   opts: { enforceIntent?: boolean } = {}
 ): Array<{ sig: string; s: KeywordSuggestion }> {
   // enforceIntent=false PREFERS transactional (ordering) instead of hard-dropping
-  // non-transactional candidates — so a seed theme whose Labs data skews
+  // non-transactional candidates - so a seed theme whose Labs data skews
   // informational ("supply chain visibility") still contributes to the pool.
   const enforceIntent = opts.enforceIntent !== false;
   const brand = brandName.trim().toLowerCase();
@@ -189,7 +189,7 @@ export function pickQueries(
   for (const c of ranked) {
     if (picked.length >= limit) break;
     // Diversity guard: skip near-duplicates of anything already picked. 0.55 is
-    // tighter than before — "transportation management X" variants share enough
+    // tighter than before - "transportation management X" variants share enough
     // words to be caught even when the trailing modifier differs.
     if (picked.some((p) => jaccard(c.sig, p.sig) >= 0.55)) continue;
     picked.push(c);
@@ -213,12 +213,12 @@ export async function buildBrandDna(
 ): Promise<DnaResult> {
   const page = await scrapeHomepage(domain, env);
   if (!page) {
-    throw new Error(`Could not read ${domain} — the site may block scrapers.`);
+    throw new Error(`Could not read ${domain} - the site may block scrapers.`);
   }
 
   // DFS caps user_prompt at ~500 chars (live-verified: longer payloads fail
-  // with "Invalid Field: 'user_prompt'"). Send a COMPACT scrape digest —
-  // domain + title + H1 + a short snippet — and let the model's own knowledge
+  // with "Invalid Field: 'user_prompt'"). Send a COMPACT scrape digest -
+  // domain + title + H1 + a short snippet - and let the model's own knowledge
   // of the domain fill the rest (knowledge-only DNA probe-verified excellent).
   const compact = [
     `Domain: ${domain}`,
@@ -259,7 +259,7 @@ export async function buildBrandDna(
     dna.seed_phrases = [dna.category, `best ${dna.category}`];
   }
 
-  // Labs suggestions per seed — parallel, failures per-seed tolerated. Cap each
+  // Labs suggestions per seed - parallel, failures per-seed tolerated. Cap each
   // seed's contribution so one broad seed ("transportation management") can't
   // flood the pool with 200 near-identical variants and crowd out the other
   // themes. Balanced pool → the selector actually has diverse material.
@@ -276,13 +276,13 @@ export async function buildBrandDna(
       all.push(...top);
     }
 
-  const ranked = rankCandidates(all, dna.brand_name, intentMode); // strict — heuristic fallback
-  const pool = balancedPool(perSeed, dna.brand_name, intentMode); // diverse — LLM selector
+  const ranked = rankCandidates(all, dna.brand_name, intentMode); // strict - heuristic fallback
+  const pool = balancedPool(perSeed, dna.brand_name, intentMode); // diverse - LLM selector
   let queries: DnaQueryPick[] = [];
   let source: 'labs' | 'llm' = 'labs';
 
   // JUDGMENT: when OpenAI is configured, let it pick the final 20 from the
-  // BALANCED per-seed pool — drops off-category keywords and diversifies across
+  // BALANCED per-seed pool - drops off-category keywords and diversifies across
   // sub-topics far better than regex. Chosen keywords are verbatim, so we map
   // back the real volumes.
   if (env.OPENAI_API_KEY && pool.length >= 5) {
@@ -354,10 +354,10 @@ export async function buildBrandDna(
         (intentMode === 'transactional'
           ? 'All transactional/commercial intent (best X, top X, X pricing, X alternatives).'
           : 'Mix commercial and informational.') +
-        ' Do NOT use the audited company\'s own name — no "[brand] pricing", ' +
+        ' Do NOT use the audited company\'s own name - no "[brand] pricing", ' +
         '"[brand] alternatives", "[brand] vs traditional/legacy/other". Write the ' +
         'queries a buyer types BEFORE they know this brand. No year references.',
-      // Compact — DFS user_prompt cap (~500 chars).
+      // Compact - DFS user_prompt cap (~500 chars).
       `Company: ${dna.brand_name} (${dna.domain}). Category: ${dna.category || 'unknown'}. Positioning: ${dna.positioning.slice(0, 200)}`.slice(0, 460),
       env
     )) as { queries?: unknown } | null;
