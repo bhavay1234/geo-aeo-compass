@@ -2,7 +2,7 @@ import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Workspace, useWorkspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
-import { BleedBar, StatePill, Sparkline, Favicon, LlmIcon } from "@/components/terminal/primitives";
+import { BleedBar, StatePill, Sparkline, Favicon, LlmIcon, InfoTip } from "@/components/terminal/primitives";
 import {
   buildGapRows,
   buildLlmScorecards,
@@ -97,7 +97,10 @@ function MetricComparison({ rows }: { rows: CompetitorRow[] }) {
             </button>
           ))}
         </div>
-        <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)" }}>{hint}</span>
+        <span className="mono" style={{ fontSize: 10.5, color: "var(--ink-3)", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {hint}
+          <InfoTip text="Visibility = share of recommendations across queries. Position = average rank where named (lower is better; the bar inverts so a longer bar = a better rank). Sentiment = 0–100 score of how positively each brand is described (gpt-4o-mini over the answers). Same data as the table below." />
+        </span>
       </div>
       {sorted.map((r) => (
         <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 7 }}>
@@ -410,8 +413,9 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
                   {s.answers ? s.visibility : "—"}
                 </span>
                 {s.answers > 0 && (
-                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                  <span className="mono" style={{ fontSize: 11, color: "var(--ink-3)", display: "inline-flex", alignItems: "center", gap: 4 }}>
                     /100 visibility
+                    <InfoTip text="Per-engine visibility = share of THIS LLM's answers where your brand is NAMED in the answer text. 'named in answer' counts those; 'in citations' counts answers whose cited sources include your own domain. Computed over only this engine's answers." />
                   </span>
                 )}
               </div>
@@ -485,7 +489,10 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
               margin: 0,
             }}
           >
-            ↗ Where to get cited · off-page targets
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              ↗ Where to get cited · off-page targets
+              <InfoTip text="Third-party pages the LLMs already cite that DON'T mention your brand yet — ranked by cross-LLM leverage (cited by more engines = higher). Excludes your own pages, homepages, single-product profile pages, off-niche sources, and dead links. The 'why list here' reason is a gpt-4o-mini judgment naming the competitors already on that page." />
+            </span>
           </h2>
           <Link
             to="/citations"
@@ -567,6 +574,9 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
         <div style={{ padding: "16px 20px 18px", borderBottom: "1px solid var(--grid-2)", background: "var(--bg)" }}>
           <h2
             style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
               fontSize: 12,
               fontWeight: 800,
               letterSpacing: ".06em",
@@ -576,6 +586,7 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
             }}
           >
             ◑ Competitors · you vs the field
+            <InfoTip text="Visibility = share of recommendations: across every query, how often each brand is named in the answers (named in any of the 3 LLMs = 1 point for that query). Avg position = mean rank in the answers where the brand is named (1 = named first). Sentiment = 0–100 score of how positively the brand is described, from a gpt-4o-mini pass over the answer text. Queries = distinct queries where named." />
           </h2>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
@@ -657,8 +668,9 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
           }}
         >
           <div style={{ padding: "16px 20px 18px", borderRight: "1px solid var(--grid)", background: "var(--bg)" }}>
-            <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--ink-2)", margin: "0 0 10px" }}>
+            <h2 style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--ink-2)", margin: "0 0 10px" }}>
               ⛁ Top source domains
+              <InfoTip text="Every URL the 3 LLMs cited across the audit, grouped by domain. 'Used' = that domain's share of all cited sources. 'Type' is the page category (Listicle, Review, Reddit, Editorial, Vendor, …) inferred from the URL + domain." />
             </h2>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
@@ -687,8 +699,9 @@ function SummaryView({ audit, polls }: { audit: Audit; polls: PollResult[] }) {
             </table>
           </div>
           <div style={{ padding: "16px 20px 18px", background: "var(--bg)" }}>
-            <h2 style={{ fontSize: 12, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--ink-2)", margin: "0 0 10px" }}>
+            <h2 style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", color: "var(--ink-2)", margin: "0 0 10px" }}>
               Sources by type
+              <InfoTip text="The mix of page types the LLMs pulled from, as a % of all cited sources. Categories are inferred deterministically from each cited URL + domain (e.g. '/best-…' → Listicle, g2/gartner → Reviews, reddit.com → Reddit)." />
             </h2>
             {/* Stacked bar as the "by type" mix. */}
             <div style={{ display: "flex", height: 12, borderRadius: 4, overflow: "hidden", marginBottom: 12 }}>

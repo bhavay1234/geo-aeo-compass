@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Workspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
-import { SourceTag, Favicon } from "@/components/terminal/primitives";
+import { SourceTag, Favicon, InfoTip } from "@/components/terminal/primitives";
 import {
   llmsPolled,
   categorizeCitations,
@@ -589,8 +589,9 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
           <div
             style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}
           >
-            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", display: "inline-flex", alignItems: "center", gap: 6 }}>
               ◆ Own-site signal
+              <InfoTip text="How strong your OWN domain is as an AI source (0–100). Weighs your own pages being directly cited most heavily, plus how often you're named across the cited sources. Strong own-site signal = the LLMs trust and quote your site directly, the most durable form of AI visibility." />
             </span>
             <span style={{ fontSize: 15, fontWeight: 800, color: ownGradeColor }}>
               {ownGrade}
@@ -659,7 +660,10 @@ function CitationsView({ audit, polls }: { audit: Audit; polls: PollResult[] }) 
       {/* ── WHERE TO GET LISTED ── one worklist; all-LLM "universal" blind spots
           lead (badged), then the rest by cross-LLM leverage. */}
       <div className="tm-phead" style={{ borderTop: "none" }}>
-        <h2 style={{ color: "var(--hot)" }}>⚑ Where to get listed</h2>
+        <h2 style={{ color: "var(--hot)", display: "flex", alignItems: "center", gap: 6 }}>
+          ⚑ Where to get listed
+          <InfoTip text="Third-party pages the LLMs cite that don't mention you yet, ranked by cross-LLM leverage (cited by all 3 = 'universal', shown first). We include only get-listable surfaces — roundups, reviews/directories, editorial, forums — and exclude homepages, single-product profile pages, off-niche sources, and dead links. The 'why list here' line is a gpt-4o-mini judgment that also names competitors already on the page." />
+        </h2>
         <span className="meta">
           {actionableMissing} third-party page{actionableMissing === 1 ? "" : "s"} you're
           missing

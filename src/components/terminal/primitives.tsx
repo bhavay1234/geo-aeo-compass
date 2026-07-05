@@ -65,6 +65,72 @@ export function Favicon({
   );
 }
 
+/**
+ * "ⓘ" info affordance with a hover/click tooltip — for transparency on how each
+ * metric is sourced/computed. Keep `text` plain and concise.
+ */
+export function InfoTip({ text, width = 260 }: { text: string; width?: number }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span
+      style={{ position: "relative", display: "inline-flex", verticalAlign: "middle" }}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        aria-label="How this is measured"
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 14,
+          height: 14,
+          borderRadius: "50%",
+          border: "1px solid var(--ink-3)",
+          background: "transparent",
+          color: "var(--ink-3)",
+          fontSize: 9.5,
+          fontWeight: 800,
+          fontStyle: "italic",
+          fontFamily: "Georgia, serif",
+          cursor: "help",
+          padding: 0,
+          lineHeight: 1,
+        }}
+      >
+        i
+      </button>
+      {open && (
+        <span
+          role="tooltip"
+          style={{
+            position: "absolute",
+            top: "150%",
+            left: 0,
+            zIndex: 60,
+            width,
+            padding: "8px 10px",
+            background: "var(--ink)",
+            color: "var(--bg)",
+            borderRadius: 6,
+            fontSize: 11.5,
+            fontWeight: 400,
+            lineHeight: 1.5,
+            letterSpacing: 0,
+            textTransform: "none",
+            boxShadow: "0 6px 20px rgba(0,0,0,.28)",
+            whiteSpace: "normal",
+          }}
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** Brand mark for an LLM, via its site's favicon (OpenAI / Perplexity / Gemini). */
 const LLM_DOMAIN: Record<LlmSource, string> = {
   chatgpt: "openai.com",

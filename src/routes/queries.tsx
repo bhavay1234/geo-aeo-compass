@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Workspace } from "@/components/Workspace";
 import { AuditGate, PartialBanner } from "@/components/terminal/AuditGate";
-import { PositionDots, SourceTag, Favicon, LlmIcon } from "@/components/terminal/primitives";
+import { PositionDots, SourceTag, Favicon, LlmIcon, InfoTip } from "@/components/terminal/primitives";
 import {
   queryState,
   aggregateQueryState,
@@ -801,9 +801,13 @@ function PollBody({
       </div>
       <div className="tm-srcs">
         {/* Panel 1: the competitor signal — brands NAMED in the prose. */}
-        <div className="lbl" style={{ color: namedInAnswer ? "var(--ink-2)" : "var(--hot)" }}>
+        <div
+          className="lbl"
+          style={{ color: namedInAnswer ? "var(--ink-2)" : "var(--hot)", display: "flex", alignItems: "center", gap: 6 }}
+        >
           {namedInAnswer ? "Also recommended" : "Recommended instead of you"} ·{" "}
           {recommended.length}
+          <InfoTip text="Products this LLM NAMED as recommendations in its answer text (parsed from the prose, then verified to actually appear). These are the competitors a buyer sees for this query — the core visibility signal, separate from which URLs were cited." />
         </div>
         {recommended.length === 0 ? (
           <p style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 18 }}>
@@ -846,10 +850,13 @@ function PollBody({
         {/* Panel 2: where this LLM sourced its answer — the "get listed" signal.
             Only THIRD-PARTY sources count; recommendation homepages are excluded
             (they're the products above, not pages you can get listed on). */}
-        <div className="lbl">
-          Where {llmName} sourced this · {ordered.length}
+        <div className="lbl" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Where {llmName} sourced this · {ordered.length}
+            <InfoTip text="The real third-party pages this LLM cited to build its answer (its grounded web sources). We resolve Gemini's redirect proxies to the true URL and drop recommendation homepages (a product's own site the model links while naming it — not a page you can get listed on). These are your get-listed targets." />
+          </span>
           {selfCiteCount > 0 && (
-            <small style={{ marginLeft: 6, fontWeight: 600, color: "var(--ink-3)" }}>
+            <small style={{ fontWeight: 600, color: "var(--ink-3)" }}>
               · {selfCiteCount} recommendation homepage{selfCiteCount > 1 ? "s" : ""} hidden
             </small>
           )}
