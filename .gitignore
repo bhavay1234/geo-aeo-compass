@@ -20,6 +20,10 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Audit script output
+descope_audit.csv
+__pycache__/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
